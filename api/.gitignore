@@ -1,5 +1,6 @@
 node_modules
 local.settings.json
+azure-app-settings.txt
 bin
 obj
 .azure
