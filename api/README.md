@@ -42,3 +42,11 @@ func azure functionapp publish <function-app-name>
 After deploying, set the same env vars as Application Settings on the
 Function App (Configuration → Application settings), and add CORS entries
 for `https://accountium.io` and `http://localhost:5173` (Function App → CORS).
+
+CI deploys via `.github/workflows/deploy-api.yml` using
+`Azure/functions-action@v1` with a publish-profile secret
+(`AZURE_FUNCTIONAPP_PUBLISH_PROFILE`). That action authenticates through
+Kudu/SCM, which newer Function Apps (Flex Consumption included) have
+disabled by default — enable **SCM Basic Auth Publishing Credentials**
+under Configuration → General settings, or the deploy fails with a 401
+fetching Kudu app settings.
