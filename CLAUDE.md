@@ -35,9 +35,8 @@ trading-journal/
 │   │   ├── Ideas.jsx
 │   │   └── Notes.jsx
 │   ├── App.jsx                    # Router + AuthProvider wrapper
-│   └── index.css                  # Tailwind directives + CSS tokens
-├── vite.config.js
-└── tailwind.config.js
+│   └── index.css                  # Tailwind import + @theme tokens
+└── vite.config.js                 # includes @tailwindcss/vite plugin
 ```
 
 ## Data Schemas
@@ -100,12 +99,16 @@ trading-journal/
    npm create vite@latest trading-journal -- --template react
    cd trading-journal
    npm install
-   npm install -D tailwindcss postcss autoprefixer
-   npx tailwindcss init -p
+   npm install tailwindcss @tailwindcss/vite
    npm install recharts react-router-dom firebase
    ```
-2. Update tailwind.config.js content array to include src/**/*.{js,ts,jsx,tsx}
-3. Replace src/index.css with Tailwind directives + CSS token :root block
+   Always install the latest major version of `tailwindcss` (currently v4)
+   and every other dependency — do not pin to older majors unless a
+   specific package breaks and needs a temporary downgrade.
+2. Add the `@tailwindcss/vite` plugin to `vite.config.js` (`plugins: [react(), tailwindcss()]`).
+   No `tailwind.config.js` or `postcss.config.js` needed for v4.
+3. Replace src/index.css with `@import "tailwindcss";` + an `@theme` block for
+   design tokens (colors, fonts) + the CSS token `:root` block for dark/light values.
 4. Create .github/workflows/deploy.yml (see prompt below)
 5. Update vite.config.js base to '/YOUR_REPO_NAME/'
 
@@ -185,6 +188,8 @@ Include loading + error states. No page components should need to change.
 
 ## Notes for Claude Code
 - Always use Tailwind utility classes, not inline styles
+- Use latest major versions of all dependencies (Tailwind v4+, etc.) — don't
+  pin to older majors unless something specifically breaks
 - Use React functional components with hooks only (no class components)
 - All forms should have proper loading and error states
 - Mobile-first: test at 390px width
