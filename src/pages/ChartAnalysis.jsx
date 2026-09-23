@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePrefersDark } from '../lib/chartColors'
 import { useApi } from '../hooks/useApi'
 import { TradingViewWidget } from '../components/TradingViewWidget'
+import { TwelveDataChart } from '../components/TwelveDataChart'
 import {
   computeATR,
   computeBollingerBands,
@@ -146,6 +147,7 @@ export default function ChartAnalysis() {
   const [indicatorSettings, setIndicatorSettings] = useState(DEFAULT_INDICATOR_STATE)
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false)
   const [openSettingsKey, setOpenSettingsKey] = useState(null)
+  const [showCompare, setShowCompare] = useState(false)
 
   const [messages, setMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
@@ -153,6 +155,11 @@ export default function ChartAnalysis() {
   const [chatError, setChatError] = useState('')
 
   const indicatorMenuRef = useRef(null)
+
+  const enabledIndicators = useMemo(
+    () => computeEnabledIndicators(candles, indicatorSettings),
+    [candles, indicatorSettings],
+  )
 
   useEffect(() => {
     if (!indicatorMenuOpen) return
@@ -223,7 +230,7 @@ export default function ChartAnalysis() {
     setSending(true)
     try {
       const heikinAshi = toHeikinAshi(candles)
-      const enabled = computeEnabledIndicators(candles, indicatorSettings)
+      const enabled = enabledIndicators
       const indicatorContext = {}
       for (const [key, val] of Object.entries(enabled)) {
         if (val.points) {
@@ -437,6 +444,17 @@ export default function ChartAnalysis() {
           </svg>
         </button>
 
+        <button
+          type="button"
+          onClick={() => setShowCompare((v) => !v)}
+          disabled={candles.length === 0}
+          className={`rounded border border-border px-2 py-1 text-xs disabled:opacity-50 ${
+            showCompare ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
+          }`}
+        >
+          Compare with Twelve Data
+        </button>
+
         {loading && <span className="text-xs text-text-muted">Loading…</span>}
       </div>
 
@@ -448,6 +466,7 @@ export default function ChartAnalysis() {
             style={TV_STYLE[candleType] ?? 1}
             studies={studies}
             theme={isDark ? 'dark' : 'light'}
+            height={showCompare ? 400 : 560}
           />
         ) : (
           <div className="flex h-[560px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-text-muted">
@@ -455,6 +474,22 @@ export default function ChartAnalysis() {
           </div>
         )}
       </div>
+
+      {showCompare && candles.length > 0 && (
+        <div className="mb-6">
+          <p className="mb-2 text-xs text-text-muted">
+            Twelve Data — the source Claude actually analyzes. Compare against the TradingView chart
+            above to check they agree.
+          </p>
+          <TwelveDataChart
+            candles={candles}
+            candleType={candleType}
+            indicators={enabledIndicators}
+            interval={interval}
+            height={400}
+          />
+        </div>
+      )}
 
       <div className="rounded-lg border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium text-text-muted">Ask Claude about this chart</h2>
