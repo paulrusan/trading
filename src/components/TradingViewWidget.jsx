@@ -15,7 +15,15 @@ function loadTradingViewScript() {
   return tvScriptPromise
 }
 
-export function TradingViewWidget({ symbol, interval, style, studies, theme, height = 560 }) {
+export function TradingViewWidget({
+  symbol,
+  interval,
+  style,
+  studies,
+  studiesOverrides,
+  theme,
+  height = 560,
+}) {
   const containerRef = useRef(null)
   const id = `tv-widget-${useId().replace(/[^a-zA-Z0-9]/g, '')}`
 
@@ -37,6 +45,7 @@ export function TradingViewWidget({ symbol, interval, style, studies, theme, hei
         style,
         locale: 'en',
         studies,
+        studies_overrides: studiesOverrides,
         hide_top_toolbar: true,
         hide_legend: false,
         allow_symbol_change: false,
@@ -48,7 +57,7 @@ export function TradingViewWidget({ symbol, interval, style, studies, theme, hei
     return () => {
       cancelled = true
     }
-  }, [symbol, interval, style, JSON.stringify(studies), theme, id])
+  }, [symbol, interval, style, JSON.stringify(studies), JSON.stringify(studiesOverrides), theme, id])
 
   return (
     <div

@@ -31,39 +31,83 @@ const OUTPUT_SIZE_BY_INTERVAL = {
 const TV_INTERVAL = { '1h': '60', '4h': '240', '1day': 'D', '1week': 'W' }
 const TV_STYLE = { simple: 1, heikinAshi: 8 }
 
+// tvOverrideName/tvOverrideKey map to TradingView's `studies_overrides` key format
+// ("<study name>.<input name>"), reverse-engineered from public examples — TradingView
+// doesn't document the free widget's exact input names, so these are best-effort and
+// silently no-op if wrong. They only apply once per shared study type (see studiesOverrides
+// below), since the free widget can't configure two instances of the same study separately.
 const INDICATOR_DEFS = [
-  { key: 'ema1', label: 'EMA', tvStudy: 'MAExp@tv-basicstudies', params: [{ key: 'period', label: 'Period', default: 20 }] },
-  { key: 'ema2', label: 'EMA', tvStudy: 'MAExp@tv-basicstudies', params: [{ key: 'period', label: 'Period', default: 50 }] },
-  { key: 'sma', label: 'SMA', tvStudy: 'MASimple@tv-basicstudies', params: [{ key: 'period', label: 'Period', default: 50 }] },
+  {
+    key: 'ema1',
+    label: 'EMA',
+    tvStudy: 'MAExp@tv-basicstudies',
+    tvOverrideName: 'moving average exponential',
+    params: [{ key: 'period', label: 'Period', default: 20, tvOverrideKey: 'length' }],
+  },
+  {
+    key: 'ema2',
+    label: 'EMA',
+    tvStudy: 'MAExp@tv-basicstudies',
+    tvOverrideName: 'moving average exponential',
+    params: [{ key: 'period', label: 'Period', default: 50, tvOverrideKey: 'length' }],
+  },
+  {
+    key: 'sma',
+    label: 'SMA',
+    tvStudy: 'MASimple@tv-basicstudies',
+    tvOverrideName: 'moving average',
+    params: [{ key: 'period', label: 'Period', default: 50, tvOverrideKey: 'length' }],
+  },
   {
     key: 'bb',
     label: 'Bollinger Bands',
     tvStudy: 'BB@tv-basicstudies',
+    tvOverrideName: 'bollinger bands',
     params: [
-      { key: 'period', label: 'Period', default: 20 },
+      { key: 'period', label: 'Period', default: 20, tvOverrideKey: 'length' },
       { key: 'stdDev', label: 'StdDev', default: 2 },
     ],
   },
-  { key: 'cci', label: 'CCI', tvStudy: 'CCI@tv-basicstudies', params: [{ key: 'period', label: 'Period', default: 14 }] },
-  { key: 'rsi', label: 'RSI', tvStudy: 'RSI@tv-basicstudies', params: [{ key: 'period', label: 'Period', default: 14 }] },
+  {
+    key: 'cci',
+    label: 'CCI',
+    tvStudy: 'CCI@tv-basicstudies',
+    tvOverrideName: 'commodity channel index',
+    params: [{ key: 'period', label: 'Period', default: 14, tvOverrideKey: 'length' }],
+  },
+  {
+    key: 'rsi',
+    label: 'RSI',
+    tvStudy: 'RSI@tv-basicstudies',
+    tvOverrideName: 'relative strength index',
+    params: [{ key: 'period', label: 'Period', default: 14, tvOverrideKey: 'length' }],
+  },
   {
     key: 'macd',
     label: 'MACD',
     tvStudy: 'MACD@tv-basicstudies',
+    tvOverrideName: 'macd',
     params: [
-      { key: 'fast', label: 'Fast', default: 12 },
-      { key: 'slow', label: 'Slow', default: 26 },
-      { key: 'signal', label: 'Signal', default: 9 },
+      { key: 'fast', label: 'Fast', default: 12, tvOverrideKey: 'fast length' },
+      { key: 'slow', label: 'Slow', default: 26, tvOverrideKey: 'slow length' },
+      { key: 'signal', label: 'Signal', default: 9, tvOverrideKey: 'signal smoothing' },
     ],
   },
-  { key: 'atr', label: 'ATR', tvStudy: 'ATR@tv-basicstudies', params: [{ key: 'period', label: 'Period', default: 14 }] },
+  {
+    key: 'atr',
+    label: 'ATR',
+    tvStudy: 'ATR@tv-basicstudies',
+    tvOverrideName: 'average true range',
+    params: [{ key: 'period', label: 'Period', default: 14, tvOverrideKey: 'length' }],
+  },
   {
     key: 'stoch',
     label: 'Stochastic',
     tvStudy: 'Stochastic@tv-basicstudies',
+    tvOverrideName: 'stochastic',
     params: [
-      { key: 'kPeriod', label: '%K', default: 14 },
-      { key: 'dPeriod', label: '%D', default: 3 },
+      { key: 'kPeriod', label: '%K', default: 14, tvOverrideKey: 'k length' },
+      { key: 'dPeriod', label: '%D', default: 3, tvOverrideKey: 'd length' },
     ],
   },
 ]
@@ -219,6 +263,18 @@ export default function ChartAnalysis() {
       INDICATOR_DEFS.filter((def) => indicatorSettings[def.key].enabled).map((def) => def.tvStudy),
     ),
   ]
+
+  const studiesOverrides = {}
+  const seenOverrideNames = new Set()
+  for (const def of INDICATOR_DEFS) {
+    const st = indicatorSettings[def.key]
+    if (!st.enabled || !def.tvOverrideName || seenOverrideNames.has(def.tvOverrideName)) continue
+    seenOverrideNames.add(def.tvOverrideName)
+    for (const p of def.params) {
+      if (!p.tvOverrideKey) continue
+      studiesOverrides[`${def.tvOverrideName}.${p.tvOverrideKey}`] = st[p.key]
+    }
+  }
 
   const send = async (text) => {
     if (!text.trim() || sending || candles.length === 0) return
@@ -412,8 +468,9 @@ export default function ChartAnalysis() {
                 )
               })}
               <p className="mt-1 px-1 text-[10px] text-text-muted">
-                Periods here drive Claude's analysis of the underlying data. The chart above shows
-                each indicator using TradingView's own default settings.
+                Periods here always drive Claude's analysis. The TradingView chart mirrors them on a
+                best-effort basis — its free widget can't uniquely configure two of the same
+                indicator, so if both EMA slots are on, only the first one's period shows visually.
               </p>
             </div>
           )}
@@ -465,6 +522,7 @@ export default function ChartAnalysis() {
             interval={TV_INTERVAL[interval] ?? 'D'}
             style={TV_STYLE[candleType] ?? 1}
             studies={studies}
+            studiesOverrides={studiesOverrides}
             theme={isDark ? 'dark' : 'light'}
             height={showCompare ? 400 : 560}
           />
