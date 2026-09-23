@@ -47,7 +47,7 @@ export function TradingViewWidget({
         studies,
         studies_overrides: studiesOverrides,
         hide_top_toolbar: true,
-        hide_legend: false,
+        hide_legend: true,
         allow_symbol_change: false,
         withdateranges: false,
         save_image: false,
