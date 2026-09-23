@@ -35,7 +35,14 @@ function formatCrosshairLabel(unixSeconds, interval) {
   })
 }
 
-export function TwelveDataChart({ candles, candleType, indicators, interval, height = 400 }) {
+export function TwelveDataChart({
+  candles,
+  candleType,
+  indicators,
+  interval,
+  height = 400,
+  onIndicatorDoubleClick,
+}) {
   const isDark = usePrefersDark()
   const colors = getChartColors(isDark)
 
@@ -101,13 +108,14 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
       )
       candleSeries.setData(displayCandles)
 
-      if (indicators.ema1) {
+      // Tracks which indicator key each overlay/oscillator line belongs to, so a
+      // double-click near a line can reopen that indicator's settings.
+      const hitTestSeries = []
+
+      if (indicators.ema) {
         const s = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, 0)
-        s.setData(reindex(indicators.ema1.points))
-      }
-      if (indicators.ema2) {
-        const s = chart.addSeries(LineSeries, { color: colors.textMuted, lineWidth: 1 }, 0)
-        s.setData(reindex(indicators.ema2.points))
+        s.setData(reindex(indicators.ema.points))
+        hitTestSeries.push({ key: 'ema', series: s })
       }
       if (indicators.sma) {
         const s = chart.addSeries(
@@ -116,6 +124,7 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
           0,
         )
         s.setData(reindex(indicators.sma.points))
+        hitTestSeries.push({ key: 'sma', series: s })
       }
       if (indicators.bb) {
         const basisSeries = chart.addSeries(LineSeries, { color: colors.textMuted, lineWidth: 1 }, 0)
@@ -132,6 +141,9 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
           0,
         )
         lowerSeries.setData(reindex(indicators.bb.lower))
+        hitTestSeries.push({ key: 'bb', series: basisSeries })
+        hitTestSeries.push({ key: 'bb', series: upperSeries })
+        hitTestSeries.push({ key: 'bb', series: lowerSeries })
       }
 
       const enabledOscillators = OSCILLATOR_ORDER.filter((key) => indicators[key])
@@ -140,6 +152,7 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
         if (key === 'cci' || key === 'rsi' || key === 'atr') {
           const s = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
           s.setData(reindex(indicators[key].points))
+          hitTestSeries.push({ key, series: s })
         } else if (key === 'macd') {
           const macdSeries = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
           macdSeries.setData(reindex(indicators.macd.macdLine))
@@ -157,12 +170,16 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
               })),
             ),
           )
+          hitTestSeries.push({ key: 'macd', series: macdSeries })
+          hitTestSeries.push({ key: 'macd', series: signalSeries })
         } else if (key === 'stoch') {
           const kSeries = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
           kSeries.setData(reindex(indicators.stoch.k))
 
           const dSeries = chart.addSeries(LineSeries, { color: colors.textMuted, lineWidth: 1 }, paneIndex)
           dSeries.setData(reindex(indicators.stoch.d))
+          hitTestSeries.push({ key: 'stoch', series: kSeries })
+          hitTestSeries.push({ key: 'stoch', series: dSeries })
         }
       })
 
@@ -171,13 +188,38 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
         from: Math.max(0, candles.length - barCount),
         to: candles.length - 1,
       })
+
+      const handleDblClick = (param) => {
+        if (!onIndicatorDoubleClick || !param.point || !param.seriesData) return
+        let closestKey = null
+        let closestDist = 10
+        for (const { key, series } of hitTestSeries) {
+          const data = param.seriesData.get(series)
+          if (!data || data.value === undefined) continue
+          const y = series.priceToCoordinate(data.value)
+          if (y === null) continue
+          const dist = Math.abs(y - param.point.y)
+          if (dist < closestDist) {
+            closestDist = dist
+            closestKey = key
+          }
+        }
+        if (closestKey) onIndicatorDoubleClick(closestKey)
+      }
+      chart.subscribeDblClick(handleDblClick)
+
+      return () => {
+        chart.unsubscribeDblClick(handleDblClick)
+        resizeObserver.disconnect()
+        chart.remove()
+      }
     }
 
     return () => {
       resizeObserver.disconnect()
       chart.remove()
     }
-  }, [colors, candles, candleType, indicators, interval, height])
+  }, [colors, candles, candleType, indicators, interval, height, onIndicatorDoubleClick])
 
   return <div ref={containerRef} style={{ height }} className="overflow-hidden rounded-lg border border-border" />
 }

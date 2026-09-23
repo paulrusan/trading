@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePrefersDark } from '../lib/chartColors'
 import { useApi } from '../hooks/useApi'
 import { TradingViewWidget } from '../components/TradingViewWidget'
@@ -33,22 +33,14 @@ const TV_STYLE = { simple: 1, heikinAshi: 8 }
 // tvOverrideName/tvOverrideKey map to TradingView's `studies_overrides` key format
 // ("<study name>.<input name>"), reverse-engineered from public examples — TradingView
 // doesn't document the free widget's exact input names, so these are best-effort and
-// silently no-op if wrong. They only apply once per shared study type (see studiesOverrides
-// below), since the free widget can't configure two instances of the same study separately.
+// silently no-op if wrong.
 const INDICATOR_DEFS = [
   {
-    key: 'ema1',
+    key: 'ema',
     label: 'EMA',
     tvStudy: 'MAExp@tv-basicstudies',
     tvOverrideName: 'moving average exponential',
     params: [{ key: 'period', label: 'Period', default: 20, tvOverrideKey: 'length' }],
-  },
-  {
-    key: 'ema2',
-    label: 'EMA',
-    tvStudy: 'MAExp@tv-basicstudies',
-    tvOverrideName: 'moving average exponential',
-    params: [{ key: 'period', label: 'Period', default: 50, tvOverrideKey: 'length' }],
   },
   {
     key: 'sma',
@@ -110,7 +102,7 @@ const INDICATOR_DEFS = [
     ],
   },
 ]
-const DEFAULT_ENABLED = new Set(['ema1', 'ema2', 'cci'])
+const DEFAULT_ENABLED = new Set(['ema', 'cci'])
 
 const DEFAULT_INDICATOR_STATE = Object.fromEntries(
   INDICATOR_DEFS.map((def) => [
@@ -128,11 +120,8 @@ function toTradingViewSymbol(symbol) {
 
 function computeEnabledIndicators(candles, settings) {
   const data = {}
-  if (settings.ema1.enabled) {
-    data.ema1 = { period: settings.ema1.period, points: computeEMA(candles, settings.ema1.period) }
-  }
-  if (settings.ema2.enabled) {
-    data.ema2 = { period: settings.ema2.period, points: computeEMA(candles, settings.ema2.period) }
+  if (settings.ema.enabled) {
+    data.ema = { period: settings.ema.period, points: computeEMA(candles, settings.ema.period) }
   }
   if (settings.sma.enabled) {
     data.sma = { period: settings.sma.period, points: computeSMA(candles, settings.sma.period) }
@@ -269,6 +258,11 @@ export default function ChartAnalysis() {
       return next
     })
   }
+
+  const handleIndicatorDoubleClick = useCallback((key) => {
+    setIndicatorMenuOpen(true)
+    setOpenSettingsKey(key)
+  }, [])
 
   const loadChart = async (e, overrideInterval, overrideSymbol) => {
     e?.preventDefault()
@@ -535,8 +529,7 @@ export default function ChartAnalysis() {
               })}
               <p className="mt-1 px-1 text-[10px] text-text-muted">
                 Periods here always drive Claude's analysis. The TradingView chart mirrors them on a
-                best-effort basis — its free widget can't uniquely configure two of the same
-                indicator, so if both EMA slots are on, only the first one's period shows visually.
+                best-effort basis, since its free widget doesn't officially document these settings.
               </p>
             </div>
           )}
@@ -611,6 +604,7 @@ export default function ChartAnalysis() {
             indicators={enabledIndicators}
             interval={interval}
             height={400}
+            onIndicatorDoubleClick={handleIndicatorDoubleClick}
           />
         </div>
       )}
