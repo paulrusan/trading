@@ -37,14 +37,16 @@ export default function ChartAnalysis() {
   const priceContainerRef = useRef(null)
   const chartRef = useRef(null)
 
-  const loadChart = async (e) => {
+  const loadChart = async (e, overrideInterval) => {
     e?.preventDefault()
-    if (!symbolInput.trim()) return
+    const sym = symbolInput.trim()
+    const int = overrideInterval ?? interval
+    if (!sym) return
     setLoading(true)
     setError('')
     setMessages([])
     try {
-      const data = await api.getMarketData(symbolInput.trim(), interval, 200)
+      const data = await api.getMarketData(sym, int, 200)
       setCandles(data.candles)
       setActiveSymbol(data.symbol)
     } catch (err) {
@@ -52,6 +54,11 @@ export default function ChartAnalysis() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleIntervalChange = (value) => {
+    setInterval_(value)
+    loadChart(undefined, value)
   }
 
   useEffect(() => {
@@ -177,59 +184,49 @@ export default function ChartAnalysis() {
 
   return (
     <div className="p-4 sm:p-6">
-      <h1 className="mb-4 text-xl font-semibold text-text">Chart Analysis</h1>
-
-      <form onSubmit={loadChart} className="mb-4 flex flex-wrap items-end gap-3">
-        <div>
-          <label className="mb-1 block text-sm text-text-muted" htmlFor="symbol">
-            Instrument / symbol
-          </label>
-          <input
-            id="symbol"
-            type="text"
-            list="symbol-suggestions"
-            value={symbolInput}
-            onChange={(e) => setSymbolInput(e.target.value)}
-            placeholder="e.g. XAU/USD, NDX, AAPL…"
-            className="rounded-md border border-border bg-surface px-3 py-2 text-text outline-none focus:border-accent"
-          />
-          <datalist id="symbol-suggestions">
-            {SYMBOL_SUGGESTIONS.map((s) => (
-              <option key={s} value={s} />
-            ))}
-          </datalist>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-text-muted" htmlFor="interval">
-            Interval
-          </label>
-          <select
-            id="interval"
-            value={interval}
-            onChange={(e) => setInterval_(e.target.value)}
-            className="rounded-md border border-border bg-surface px-3 py-2 text-text outline-none focus:border-accent"
-          >
-            {INTERVALS.map((i) => (
-              <option key={i.value} value={i.value}>
-                {i.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-md bg-accent px-4 py-2 font-medium text-white hover:opacity-90 disabled:opacity-50"
-        >
-          {loading ? 'Loading…' : 'Load chart'}
-        </button>
-      </form>
-
       {error && <p className="mb-4 text-sm text-loss">{error}</p>}
 
-      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+      <div className="relative mb-3">
+        <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface/90 px-2 py-1.5 backdrop-blur-sm">
+          <form onSubmit={loadChart} className="flex items-center gap-1.5">
+            <input
+              id="symbol"
+              type="text"
+              list="symbol-suggestions"
+              value={symbolInput}
+              onChange={(e) => setSymbolInput(e.target.value)}
+              placeholder="Symbol"
+              className="w-24 rounded border border-border bg-bg px-2 py-1 text-sm text-text outline-none focus:border-accent"
+            />
+            <datalist id="symbol-suggestions">
+              {SYMBOL_SUGGESTIONS.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+          </form>
+
+          <div className="flex rounded border border-border p-0.5">
+            {INTERVALS.map((i) => (
+              <button
+                key={i.value}
+                type="button"
+                onClick={() => handleIntervalChange(i.value)}
+                className={`rounded px-2 py-1 text-xs ${
+                  interval === i.value ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
+                }`}
+              >
+                {i.label}
+              </button>
+            ))}
+          </div>
+
+          {loading && <span className="text-xs text-text-muted">Loading…</span>}
+        </div>
+
+        <div ref={priceContainerRef} className="overflow-hidden rounded-lg border border-border" />
+      </div>
+
+      <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
         <div className="flex rounded-md border border-border p-0.5">
           <button
             type="button"
@@ -281,12 +278,6 @@ export default function ChartAnalysis() {
           CCI (14)
         </label>
       </div>
-
-      <div className="mb-2 text-sm text-text-muted">{activeSymbol}</div>
-      <div
-        ref={priceContainerRef}
-        className="mb-6 overflow-hidden rounded-lg border border-border"
-      />
 
       <div className="rounded-lg border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium text-text-muted">Ask Claude about this chart</h2>
