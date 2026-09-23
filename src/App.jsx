@@ -3,6 +3,7 @@ import { NavBar } from './components/NavBar'
 import { PrivateRoute } from './components/PrivateRoute'
 import { AuthProvider } from './context/AuthContext'
 import Assistant from './pages/Assistant'
+import ChartAnalysis from './pages/ChartAnalysis'
 import Dashboard from './pages/Dashboard'
 import Ideas from './pages/Ideas'
 import Landing from './pages/Landing'
@@ -50,6 +51,14 @@ function App() {
             element={
               <PrivateRoute>
                 <Notes />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/chart"
+            element={
+              <PrivateRoute>
+                <ChartAnalysis />
               </PrivateRoute>
             }
           />

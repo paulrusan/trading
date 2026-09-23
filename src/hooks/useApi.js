@@ -79,6 +79,15 @@ export function useApi() {
     [call],
   )
 
+  const getMarketData = useCallback(
+    (symbol, interval = '1day', outputsize = 200) =>
+      call(
+        `/market-data?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&outputsize=${outputsize}`,
+        { method: 'GET' },
+      ),
+    [call],
+  )
+
   return {
     loading,
     error,
@@ -95,5 +104,6 @@ export function useApi() {
     saveSettings,
     deleteSettings,
     askAssistant,
+    getMarketData,
   }
 }

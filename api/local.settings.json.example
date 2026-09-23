@@ -7,7 +7,8 @@
     "COSMOS_DATABASE_NAME": "paultrading",
     "FIREBASE_PROJECT_ID": "",
     "FIREBASE_CLIENT_EMAIL": "",
-    "FIREBASE_PRIVATE_KEY": ""
+    "FIREBASE_PRIVATE_KEY": "",
+    "TWELVE_DATA_API_KEY": ""
   },
   "Host": {
     "CORS": "*"

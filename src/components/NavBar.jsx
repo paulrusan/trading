@@ -30,6 +30,9 @@ export function NavBar() {
           <Link to="/notes" className="text-text-muted hover:text-text">
             Notes
           </Link>
+          <Link to="/chart" className="text-text-muted hover:text-text">
+            Chart
+          </Link>
           <Link to="/assistant" className="text-text-muted hover:text-text">
             Assistant
           </Link>
