@@ -12,10 +12,10 @@ const INTERVALS = [
   { value: '1week', label: 'Weekly' },
 ]
 const OUTPUT_SIZE_BY_INTERVAL = {
-  '1h': 500,
-  '4h': 500,
-  '1day': 500,
-  '1week': 500,
+  '1h': 5000,
+  '4h': 5000,
+  '1day': 5000,
+  '1week': 5000,
 }
 
 export default function ChartAnalysis() {
