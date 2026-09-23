@@ -24,6 +24,11 @@ export default function ChartAnalysis() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  const [candleType, setCandleType] = useState('heikinAshi')
+  const [showEma20, setShowEma20] = useState(true)
+  const [showEma50, setShowEma50] = useState(true)
+  const [showCci, setShowCci] = useState(true)
+
   const [messages, setMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -84,10 +89,8 @@ export default function ChartAnalysis() {
     const chart = chartRef.current
     if (!chart || candles.length === 0) return
 
-    const heikinAshi = toHeikinAshi(candles)
-    const ema20 = computeEMA(candles, 20)
-    const ema50 = computeEMA(candles, 50)
-    const cci = computeCCI(candles, 14)
+    const displayCandles = candleType === 'heikinAshi' ? toHeikinAshi(candles) : candles
+    const series = []
 
     const candleSeries = chart.addSeries(
       CandlestickSeries,
@@ -100,30 +103,37 @@ export default function ChartAnalysis() {
       },
       0,
     )
-    candleSeries.setData(heikinAshi)
+    candleSeries.setData(displayCandles)
+    series.push(candleSeries)
 
-    const ema20Series = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, 0)
-    ema20Series.setData(ema20)
+    if (showEma20) {
+      const ema20Series = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, 0)
+      ema20Series.setData(computeEMA(candles, 20))
+      series.push(ema20Series)
+    }
 
-    const ema50Series = chart.addSeries(
-      LineSeries,
-      { color: colors.textMuted, lineWidth: 1 },
-      0,
-    )
-    ema50Series.setData(ema50)
+    if (showEma50) {
+      const ema50Series = chart.addSeries(
+        LineSeries,
+        { color: colors.textMuted, lineWidth: 1 },
+        0,
+      )
+      ema50Series.setData(computeEMA(candles, 50))
+      series.push(ema50Series)
+    }
 
-    const cciSeries = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, 1)
-    cciSeries.setData(cci)
+    if (showCci) {
+      const cciSeries = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, 1)
+      cciSeries.setData(computeCCI(candles, 14))
+      series.push(cciSeries)
+    }
 
     chart.timeScale().fitContent()
 
     return () => {
-      chart.removeSeries(candleSeries)
-      chart.removeSeries(ema20Series)
-      chart.removeSeries(ema50Series)
-      chart.removeSeries(cciSeries)
+      for (const s of series) chart.removeSeries(s)
     }
-  }, [candles, colors])
+  }, [candles, colors, candleType, showEma20, showEma50, showCci])
 
   const send = async (text) => {
     if (!text.trim() || sending || candles.length === 0) return
@@ -219,9 +229,60 @@ export default function ChartAnalysis() {
 
       {error && <p className="mb-4 text-sm text-loss">{error}</p>}
 
-      <div className="mb-2 text-sm text-text-muted">
-        {activeSymbol && `${activeSymbol} · Heikin Ashi · EMA 20/50 · CCI (14)`}
+      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+        <div className="flex rounded-md border border-border p-0.5">
+          <button
+            type="button"
+            onClick={() => setCandleType('simple')}
+            className={`rounded px-3 py-1 ${
+              candleType === 'simple' ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
+            }`}
+          >
+            Simple
+          </button>
+          <button
+            type="button"
+            onClick={() => setCandleType('heikinAshi')}
+            className={`rounded px-3 py-1 ${
+              candleType === 'heikinAshi'
+                ? 'bg-accent text-white'
+                : 'text-text-muted hover:text-text'
+            }`}
+          >
+            Heikin Ashi
+          </button>
+        </div>
+
+        <label className="flex items-center gap-1.5 text-text-muted">
+          <input
+            type="checkbox"
+            checked={showEma20}
+            onChange={(e) => setShowEma20(e.target.checked)}
+            className="accent-accent"
+          />
+          EMA 20
+        </label>
+        <label className="flex items-center gap-1.5 text-text-muted">
+          <input
+            type="checkbox"
+            checked={showEma50}
+            onChange={(e) => setShowEma50(e.target.checked)}
+            className="accent-accent"
+          />
+          EMA 50
+        </label>
+        <label className="flex items-center gap-1.5 text-text-muted">
+          <input
+            type="checkbox"
+            checked={showCci}
+            onChange={(e) => setShowCci(e.target.checked)}
+            className="accent-accent"
+          />
+          CCI (14)
+        </label>
       </div>
+
+      <div className="mb-2 text-sm text-text-muted">{activeSymbol}</div>
       <div
         ref={priceContainerRef}
         className="mb-6 overflow-hidden rounded-lg border border-border"
