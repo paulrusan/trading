@@ -38,6 +38,12 @@ app.http('marketData', {
       return { status: 400, jsonBody: { error: data.message ?? 'Market data request failed.' } }
     }
 
+    // Twelve Data returns real-looking (non-flat) Saturday/Sunday bars for forex and
+    // metals — confirmed by inspecting live responses, not just a timezone artifact —
+    // while crypto genuinely trades every day. Drop weekend bars for anything that
+    // isn't crypto so non-trading days don't show up as real candles.
+    const isContinuousMarket = data.meta?.type === 'Digital Currency'
+
     const candles = (data.values ?? [])
       .map((v) => {
         // Intraday values come back as "YYYY-MM-DD HH:mm:ss" — force UTC parsing
@@ -54,6 +60,11 @@ app.http('marketData', {
           low: Number(v.low),
           close: Number(v.close),
         }
+      })
+      .filter((c) => {
+        if (isContinuousMarket || interval === '1week') return true
+        const day = new Date(c.time * 1000).getUTCDay()
+        return day !== 0 && day !== 6
       })
       .reverse()
 
