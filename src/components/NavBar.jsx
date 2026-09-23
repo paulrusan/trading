@@ -17,7 +17,7 @@ export function NavBar() {
       </Link>
 
       {user ? (
-        <div className="flex items-center gap-4 text-sm">
+        <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-sm">
           <Link to="/dashboard" className="text-text-muted hover:text-text">
             Dashboard
           </Link>
@@ -29,6 +29,12 @@ export function NavBar() {
           </Link>
           <Link to="/notes" className="text-text-muted hover:text-text">
             Notes
+          </Link>
+          <Link to="/assistant" className="text-text-muted hover:text-text">
+            Assistant
+          </Link>
+          <Link to="/settings" className="text-text-muted hover:text-text">
+            Settings
           </Link>
           <button
             type="button"

@@ -88,6 +88,34 @@ trading-journal/
 }
 ```
 
+### Settings
+```js
+{
+  id: string,            // same value as userId (one doc per user)
+  userId: string,
+  anthropicApiKey: string | undefined,
+}
+```
+
+## AI Assistant (bring-your-own-key)
+`/settings` and `/assistant` pages. Each user pastes their own Anthropic API
+key (console.anthropic.com) in Settings — there's no OAuth/login flow for
+this, it's a manual key generated once per user. The key is stored server-side
+in the `settings` Cosmos container (partition key `/userId`, doc id = userId)
+and is **write-only from the client's perspective**: `GET /api/settings`
+only ever returns `{ hasAnthropicApiKey: boolean }`, never the raw key.
+
+`POST /api/assistant` (api/src/functions/assistant.js) verifies the Firebase
+token, reads the caller's own key from Cosmos, and calls the Anthropic
+Messages API (model: `claude-sonnet-5`) server-to-server — the key is never
+sent to or visible from the browser. The request body is
+`{ message, context, history }` where `context` is a summary of the user's
+trades (stats, P&L by instrument, monthly performance, last 20 trades) built
+client-side from `useApi().getTrades()`, and `history` is the last ~10 chat
+messages for continuity. The system prompt embeds that context so the
+assistant can analyze patterns, build projections, and reason through
+scenarios grounded in the user's actual journal data.
+
 ## Trading Strategy Context
 - Entry: 100 shares at start of new trend (CCI crosses +100 or -100)
 - Partial sell: 30-40 shares when trend loses momentum (CCI weakening)

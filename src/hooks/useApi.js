@@ -66,6 +66,19 @@ export function useApi() {
   )
   const deleteNote = useCallback((id) => call(`/notes/${id}`, { method: 'DELETE' }), [call])
 
+  const getSettings = useCallback(() => call('/settings', { method: 'GET' }), [call])
+  const saveSettings = useCallback(
+    (settings) => call('/settings', { method: 'POST', body: JSON.stringify(settings) }),
+    [call],
+  )
+  const deleteSettings = useCallback(() => call('/settings', { method: 'DELETE' }), [call])
+
+  const askAssistant = useCallback(
+    (message, context, history) =>
+      call('/assistant', { method: 'POST', body: JSON.stringify({ message, context, history }) }),
+    [call],
+  )
+
   return {
     loading,
     error,
@@ -78,5 +91,9 @@ export function useApi() {
     getNotes,
     saveNote,
     deleteNote,
+    getSettings,
+    saveSettings,
+    deleteSettings,
+    askAssistant,
   }
 }

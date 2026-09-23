@@ -2,12 +2,14 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { NavBar } from './components/NavBar'
 import { PrivateRoute } from './components/PrivateRoute'
 import { AuthProvider } from './context/AuthContext'
+import Assistant from './pages/Assistant'
 import Dashboard from './pages/Dashboard'
 import Ideas from './pages/Ideas'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Notes from './pages/Notes'
 import Register from './pages/Register'
+import Settings from './pages/Settings'
 import Trades from './pages/Trades'
 
 function App() {
@@ -48,6 +50,22 @@ function App() {
             element={
               <PrivateRoute>
                 <Notes />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/assistant"
+            element={
+              <PrivateRoute>
+                <Assistant />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <PrivateRoute>
+                <Settings />
               </PrivateRoute>
             }
           />
