@@ -80,7 +80,7 @@ export function useApi() {
   )
 
   const getMarketData = useCallback(
-    (symbol, interval = '1day', outputsize = 200) =>
+    (symbol, interval = '1day', outputsize = 500) =>
       call(
         `/market-data?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&outputsize=${outputsize}`,
         { method: 'GET' },

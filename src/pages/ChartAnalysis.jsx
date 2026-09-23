@@ -11,6 +11,12 @@ const INTERVALS = [
   { value: '1day', label: 'Daily' },
   { value: '1week', label: 'Weekly' },
 ]
+const OUTPUT_SIZE_BY_INTERVAL = {
+  '1h': 500,
+  '4h': 500,
+  '1day': 500,
+  '1week': 500,
+}
 
 export default function ChartAnalysis() {
   const api = useApi()
@@ -46,7 +52,7 @@ export default function ChartAnalysis() {
     setError('')
     setMessages([])
     try {
-      const data = await api.getMarketData(sym, int, 200)
+      const data = await api.getMarketData(sym, int, OUTPUT_SIZE_BY_INTERVAL[int] ?? 500)
       setCandles(data.candles)
       setActiveSymbol(data.symbol)
     } catch (err) {
