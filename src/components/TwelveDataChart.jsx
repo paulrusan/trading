@@ -4,8 +4,6 @@ import { getChartColors, usePrefersDark } from '../lib/chartColors'
 import { toHeikinAshi } from '../lib/indicators'
 
 const OSCILLATOR_ORDER = ['cci', 'rsi', 'macd', 'atr', 'stoch']
-// Default zoom expressed as a bar count (not calendar time) so it's unaffected by
-// non-trading days being skipped — see toChartTime below.
 const DEFAULT_VISIBLE_BARS = {
   '1h': 500,
   '4h': 500,
@@ -13,18 +11,28 @@ const DEFAULT_VISIBLE_BARS = {
   '1week': 156,
 }
 
-// Daily/weekly bars use TradingView's "business day" time format, which lightweight-charts
-// positions at consecutive indices rather than real elapsed time — this is what skips
-// weekends/holidays instead of rendering them as blank gaps. Intraday bars keep a real
-// UNIX timestamp since business-day format has no time-of-day component.
-function toChartTime(unixSeconds, interval) {
-  if (interval !== '1day' && interval !== '1week') return unixSeconds
+function formatTickLabel(unixSeconds, interval) {
+  if (!unixSeconds) return ''
   const d = new Date(unixSeconds * 1000)
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
+  if (interval === '1day' || interval === '1week') {
+    return d.toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' })
+  }
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function mapTime(points, interval) {
-  return points.map((p) => ({ ...p, time: toChartTime(p.time, interval) }))
+function formatCrosshairLabel(unixSeconds, interval) {
+  if (!unixSeconds) return ''
+  const d = new Date(unixSeconds * 1000)
+  if (interval === '1day' || interval === '1week') {
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+  }
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 export function TwelveDataChart({ candles, candleType, indicators, interval, height = 400 }) {
@@ -36,6 +44,10 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
   useEffect(() => {
     if (!containerRef.current) return
 
+    // Bars are indexed 0..N-1 instead of placed by real UNIX time, so non-trading
+    // periods (nights, weekends, holidays) take up no axis space on ANY timeframe —
+    // matching how TradingView's own chart compresses gaps. Real dates/times are
+    // looked up from `candles` by index for axis labels and the crosshair tooltip.
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height,
@@ -44,7 +56,13 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
         vertLines: { color: colors.grid },
         horzLines: { color: colors.grid },
       },
-      timeScale: { borderColor: colors.grid },
+      timeScale: {
+        borderColor: colors.grid,
+        tickMarkFormatter: (time) => formatTickLabel(candles[time]?.time, interval),
+      },
+      localization: {
+        timeFormatter: (time) => formatCrosshairLabel(candles[time]?.time, interval),
+      },
       rightPriceScale: { borderColor: colors.grid },
     })
 
@@ -56,7 +74,19 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
     resizeObserver.observe(containerRef.current)
 
     if (candles.length > 0) {
-      const displayCandles = candleType === 'heikinAshi' ? toHeikinAshi(candles) : candles
+      const realTimeToIndex = new Map(candles.map((c, i) => [c.time, i]))
+      const reindex = (points) => {
+        const result = []
+        for (const p of points) {
+          const idx = realTimeToIndex.get(p.time)
+          if (idx !== undefined) result.push({ ...p, time: idx })
+        }
+        return result
+      }
+
+      const displayCandles = (candleType === 'heikinAshi' ? toHeikinAshi(candles) : candles).map(
+        (c, i) => ({ ...c, time: i }),
+      )
 
       const candleSeries = chart.addSeries(
         CandlestickSeries,
@@ -69,15 +99,15 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
         },
         0,
       )
-      candleSeries.setData(mapTime(displayCandles, interval))
+      candleSeries.setData(displayCandles)
 
       if (indicators.ema1) {
         const s = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, 0)
-        s.setData(mapTime(indicators.ema1.points, interval))
+        s.setData(reindex(indicators.ema1.points))
       }
       if (indicators.ema2) {
         const s = chart.addSeries(LineSeries, { color: colors.textMuted, lineWidth: 1 }, 0)
-        s.setData(mapTime(indicators.ema2.points, interval))
+        s.setData(reindex(indicators.ema2.points))
       }
       if (indicators.sma) {
         const s = chart.addSeries(
@@ -85,23 +115,23 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
           { color: colors.accent, lineWidth: 1, lineStyle: LineStyle.Dashed },
           0,
         )
-        s.setData(mapTime(indicators.sma.points, interval))
+        s.setData(reindex(indicators.sma.points))
       }
       if (indicators.bb) {
         const basisSeries = chart.addSeries(LineSeries, { color: colors.textMuted, lineWidth: 1 }, 0)
-        basisSeries.setData(mapTime(indicators.bb.basis, interval))
+        basisSeries.setData(reindex(indicators.bb.basis))
         const upperSeries = chart.addSeries(
           LineSeries,
           { color: colors.textMuted, lineWidth: 1, lineStyle: LineStyle.Dotted },
           0,
         )
-        upperSeries.setData(mapTime(indicators.bb.upper, interval))
+        upperSeries.setData(reindex(indicators.bb.upper))
         const lowerSeries = chart.addSeries(
           LineSeries,
           { color: colors.textMuted, lineWidth: 1, lineStyle: LineStyle.Dotted },
           0,
         )
-        lowerSeries.setData(mapTime(indicators.bb.lower, interval))
+        lowerSeries.setData(reindex(indicators.bb.lower))
       }
 
       const enabledOscillators = OSCILLATOR_ORDER.filter((key) => indicators[key])
@@ -109,31 +139,30 @@ export function TwelveDataChart({ candles, candleType, indicators, interval, hei
         const paneIndex = idx + 1
         if (key === 'cci' || key === 'rsi' || key === 'atr') {
           const s = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
-          s.setData(mapTime(indicators[key].points, interval))
+          s.setData(reindex(indicators[key].points))
         } else if (key === 'macd') {
           const macdSeries = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
-          macdSeries.setData(mapTime(indicators.macd.macdLine, interval))
+          macdSeries.setData(reindex(indicators.macd.macdLine))
 
           const signalSeries = chart.addSeries(LineSeries, { color: colors.textMuted, lineWidth: 1 }, paneIndex)
-          signalSeries.setData(mapTime(indicators.macd.signalLine, interval))
+          signalSeries.setData(reindex(indicators.macd.signalLine))
 
           const histSeries = chart.addSeries(HistogramSeries, { color: colors.profit }, paneIndex)
           histSeries.setData(
-            mapTime(
+            reindex(
               indicators.macd.histogram.map((p) => ({
                 time: p.time,
                 value: p.value,
                 color: p.value >= 0 ? colors.profit : colors.loss,
               })),
-              interval,
             ),
           )
         } else if (key === 'stoch') {
           const kSeries = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
-          kSeries.setData(mapTime(indicators.stoch.k, interval))
+          kSeries.setData(reindex(indicators.stoch.k))
 
           const dSeries = chart.addSeries(LineSeries, { color: colors.textMuted, lineWidth: 1 }, paneIndex)
-          dSeries.setData(mapTime(indicators.stoch.d, interval))
+          dSeries.setData(reindex(indicators.stoch.d))
         }
       })
 
