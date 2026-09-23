@@ -191,6 +191,7 @@ export default function ChartAnalysis() {
 
   const indicatorMenuRef = useRef(null)
   const symbolSearchRef = useRef(null)
+  const symbolInputRef = useRef(null)
 
   const enabledIndicators = useMemo(
     () => computeEnabledIndicators(candles, indicatorSettings),
@@ -241,6 +242,20 @@ export default function ChartAnalysis() {
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbolInput])
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const target = e.target
+      const isTyping =
+        target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+      if (isTyping || e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1) return
+      symbolInputRef.current?.focus()
+      setSymbolInput(e.key)
+      setSymbolSearchOpen(true)
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   const toggleIndicator = (key) => {
     setIndicatorSettings((prev) => ({ ...prev, [key]: { ...prev[key], enabled: !prev[key].enabled } }))
@@ -390,6 +405,7 @@ export default function ChartAnalysis() {
           <form onSubmit={loadChart}>
             <input
               id="symbol"
+              ref={symbolInputRef}
               type="text"
               value={symbolInput}
               onChange={(e) => setSymbolInput(e.target.value)}
@@ -568,7 +584,7 @@ export default function ChartAnalysis() {
             showCompare ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
           }`}
         >
-          Compare with Twelve Data
+          Compare
         </button>
 
         {loading && <span className="text-xs text-text-muted">Loading…</span>}
