@@ -1,7 +1,8 @@
 import { app } from '@azure/functions'
+import { getContainer } from './cosmosClient.js'
 import { verifyAuth } from './verifyAuth.js'
 
-export function registerCrudRoutes(resource, container) {
+export function registerCrudRoutes(resource, containerName) {
   app.http(`${resource}List`, {
     methods: ['GET'],
     route: resource,
@@ -10,8 +11,8 @@ export function registerCrudRoutes(resource, container) {
       const uid = await verifyAuth(request)
       if (!uid) return { status: 401, jsonBody: { error: 'Unauthorized' } }
 
-      const { resources } = await container.items
-        .query({
+      const { resources } = await getContainer(containerName)
+        .items.query({
           query: 'SELECT * FROM c WHERE c.userId = @userId',
           parameters: [{ name: '@userId', value: uid }],
         })
@@ -36,7 +37,7 @@ export function registerCrudRoutes(resource, container) {
         userId: uid,
       }
 
-      const { resource: saved } = await container.items.upsert(item)
+      const { resource: saved } = await getContainer(containerName).items.upsert(item)
       return { jsonBody: saved }
     },
   })
@@ -51,7 +52,7 @@ export function registerCrudRoutes(resource, container) {
 
       const { id } = request.params
       try {
-        await container.item(id, uid).delete()
+        await getContainer(containerName).item(id, uid).delete()
         return { status: 204 }
       } catch (err) {
         if (err.code === 404) {

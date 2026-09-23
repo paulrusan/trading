@@ -1,8 +1,15 @@
 import { CosmosClient } from '@azure/cosmos'
 
-const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING)
-const database = client.database(process.env.COSMOS_DATABASE_NAME)
+let database
 
-export const tradesContainer = database.container('trades')
-export const ideasContainer = database.container('ideas')
-export const notesContainer = database.container('notes')
+function getDatabase() {
+  if (!database) {
+    const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING)
+    database = client.database(process.env.COSMOS_DATABASE_NAME)
+  }
+  return database
+}
+
+export function getContainer(name) {
+  return getDatabase().container(name)
+}

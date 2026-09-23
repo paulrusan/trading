@@ -1,6 +1,7 @@
 node_modules
 local.settings.json
 azure-app-settings.txt
+release.zip
 bin
 obj
 .azure
