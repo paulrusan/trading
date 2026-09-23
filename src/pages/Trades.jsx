@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { TradeDrawer } from '../components/TradeDrawer'
 import { TradeSellModal } from '../components/TradeSellModal'
 import { useApi } from '../hooks/useApi'
-import { INSTRUMENTS, STATUS_LABELS } from '../lib/constants'
+import { DEFAULT_INSTRUMENTS, STATUS_LABELS } from '../lib/constants'
 import { hasRealizedActivity, realizedPnl, remainingShares } from '../lib/tradePnl'
 
 const STATUS_TABS = ['all', 'open', 'partial', 'closed']
@@ -72,6 +72,15 @@ export default function Trades() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const usedInstruments = useMemo(
+    () => Array.from(new Set(trades.map((t) => t.instrument))).sort(),
+    [trades],
+  )
+  const knownInstruments = useMemo(
+    () => Array.from(new Set([...DEFAULT_INSTRUMENTS, ...usedInstruments])).sort(),
+    [usedInstruments],
+  )
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -159,7 +168,7 @@ export default function Trades() {
           className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text outline-none focus:border-accent"
         >
           <option value="all">All instruments</option>
-          {INSTRUMENTS.map((i) => (
+          {usedInstruments.map((i) => (
             <option key={i} value={i}>
               {i}
             </option>
@@ -268,6 +277,7 @@ export default function Trades() {
       {drawerTrade !== undefined && (
         <TradeDrawer
           trade={drawerTrade}
+          knownInstruments={knownInstruments}
           onClose={() => setDrawerTrade(undefined)}
           onSave={handleSaveTrade}
         />

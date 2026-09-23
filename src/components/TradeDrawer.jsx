@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import { INSTRUMENTS } from '../lib/constants'
 
 const emptyTrade = {
-  instrument: INSTRUMENTS[0],
+  instrument: '',
   direction: 'long',
   entryDate: new Date().toISOString().slice(0, 10),
   entryPrice: '',
@@ -11,7 +10,7 @@ const emptyTrade = {
   tags: '',
 }
 
-export function TradeDrawer({ trade, onClose, onSave }) {
+export function TradeDrawer({ trade, knownInstruments, onClose, onSave }) {
   const isEdit = Boolean(trade)
   const [form, setForm] = useState(() =>
     trade
@@ -75,18 +74,19 @@ export function TradeDrawer({ trade, onClose, onSave }) {
             <label className="mb-1 block text-sm text-text-muted" htmlFor="instrument">
               Instrument
             </label>
-            <select
+            <input
               id="instrument"
+              type="text"
+              required
+              list="instrument-options"
+              placeholder="e.g. Gold, Bitcoin, AAPL…"
               value={form.instrument}
               onChange={update('instrument')}
               className="w-full rounded-md border border-border bg-bg px-3 py-2 text-text outline-none focus:border-accent"
-            >
-              {INSTRUMENTS.map((i) => (
-                <option key={i} value={i}>
-                  {i}
-                </option>
-              ))}
-            </select>
+            />
+            <datalist id="instrument-options">
+              {knownInstruments?.map((i) => <option key={i} value={i} />)}
+            </datalist>
           </div>
 
           <div>

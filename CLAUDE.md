@@ -1,7 +1,8 @@
 # Trading Journal — Project Instructions
 
 ## Project Overview
-Personal trading journal web app. Instruments: Gold, Silver, Nasdaq, S&P 500.
+Personal trading journal web app. Instruments are free-text (not a fixed
+list) — Gold, Silver, Nasdaq, and S&P 500 are just the default suggestions.
 Stack: Vite + React, Tailwind CSS, Recharts, React Router, Firebase Auth.
 Hosting: GitHub Pages (gh-pages branch, auto-deploy via GitHub Actions).
 Backend (Phase 4): Azure Functions + Cosmos DB serverless.
@@ -46,7 +47,7 @@ trading-journal/
 {
   id: string,           // crypto.randomUUID()
   userId: string,       // Firebase uid
-  instrument: 'Gold' | 'Silver' | 'Nasdaq' | 'SP500',
+  instrument: string,   // free text, not a fixed enum
   direction: 'long' | 'short',
   entryDate: string,    // ISO date
   entryPrice: number,
