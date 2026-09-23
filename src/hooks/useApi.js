@@ -88,6 +88,11 @@ export function useApi() {
     [call],
   )
 
+  const searchSymbols = useCallback(
+    (query) => call(`/symbol-search?query=${encodeURIComponent(query)}`, { method: 'GET' }),
+    [call],
+  )
+
   return {
     loading,
     error,
@@ -105,5 +110,6 @@ export function useApi() {
     deleteSettings,
     askAssistant,
     getMarketData,
+    searchSymbols,
   }
 }

@@ -21,6 +21,11 @@ read or write another user's data.
   proxies Twelve Data's `time_series` endpoint using a single app-wide key
   (not per-user), returns `{ symbol, interval, candles }` with `time` as a
   UNIX timestamp (seconds) for direct use with `lightweight-charts`.
+- `GET /api/symbol-search?query=gold` — proxies Twelve Data's
+  `symbol_search` endpoint (same app-wide key), returns
+  `{ results: [{ symbol, name, exchange, type, country }] }` so the chart
+  page's symbol field can suggest instruments as the user types instead of
+  requiring an exact Twelve Data symbol format.
 
 ## Local development
 

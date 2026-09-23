@@ -15,7 +15,6 @@ import {
   toHeikinAshi,
 } from '../lib/indicators'
 
-const SYMBOL_SUGGESTIONS = ['XAU/USD', 'XAG/USD', 'NDX', 'SPX', 'BTC/USD', 'AAPL']
 const INTERVALS = [
   { value: '1h', label: '1 hour' },
   { value: '4h', label: '4 hour' },
@@ -180,7 +179,10 @@ export default function ChartAnalysis() {
   const api = useApi()
   const isDark = usePrefersDark()
 
-  const [symbolInput, setSymbolInput] = useState('XAU/USD')
+  const [symbolInput, setSymbolInput] = useState('')
+  const [symbolResults, setSymbolResults] = useState([])
+  const [symbolSearchOpen, setSymbolSearchOpen] = useState(false)
+  const [symbolSearchLoading, setSymbolSearchLoading] = useState(false)
   const [interval, setInterval_] = useState('1day')
   const [activeSymbol, setActiveSymbol] = useState(null)
   const [candles, setCandles] = useState([])
@@ -199,6 +201,7 @@ export default function ChartAnalysis() {
   const [chatError, setChatError] = useState('')
 
   const indicatorMenuRef = useRef(null)
+  const symbolSearchRef = useRef(null)
 
   const enabledIndicators = useMemo(
     () => computeEnabledIndicators(candles, indicatorSettings),
@@ -217,6 +220,39 @@ export default function ChartAnalysis() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [indicatorMenuOpen])
 
+  useEffect(() => {
+    if (!symbolSearchOpen) return
+    const handleClickOutside = (e) => {
+      if (symbolSearchRef.current && !symbolSearchRef.current.contains(e.target)) {
+        setSymbolSearchOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [symbolSearchOpen])
+
+  useEffect(() => {
+    const query = symbolInput.trim()
+    if (query.length < 1) {
+      setSymbolResults([])
+      setSymbolSearchLoading(false)
+      return
+    }
+    setSymbolSearchLoading(true)
+    const timer = setTimeout(async () => {
+      try {
+        const data = await api.searchSymbols(query)
+        setSymbolResults(data.results ?? [])
+      } catch {
+        setSymbolResults([])
+      } finally {
+        setSymbolSearchLoading(false)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbolInput])
+
   const toggleIndicator = (key) => {
     setIndicatorSettings((prev) => ({ ...prev, [key]: { ...prev[key], enabled: !prev[key].enabled } }))
   }
@@ -234,9 +270,9 @@ export default function ChartAnalysis() {
     })
   }
 
-  const loadChart = async (e, overrideInterval) => {
+  const loadChart = async (e, overrideInterval, overrideSymbol) => {
     e?.preventDefault()
-    const sym = symbolInput.trim()
+    const sym = (overrideSymbol ?? symbolInput).trim()
     const int = overrideInterval ?? interval
     if (!sym) return
     setLoading(true)
@@ -256,6 +292,13 @@ export default function ChartAnalysis() {
   const handleIntervalChange = (value) => {
     setInterval_(value)
     loadChart(undefined, value)
+  }
+
+  const selectSymbol = (symbol) => {
+    setSymbolInput(symbol)
+    setSymbolResults([])
+    setSymbolSearchOpen(false)
+    loadChart(undefined, undefined, symbol)
   }
 
   const studies = [
@@ -349,22 +392,45 @@ export default function ChartAnalysis() {
       {error && <p className="mb-4 text-sm text-loss">{error}</p>}
 
       <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5">
-        <form onSubmit={loadChart} className="flex items-center gap-1.5">
-          <input
-            id="symbol"
-            type="text"
-            list="symbol-suggestions"
-            value={symbolInput}
-            onChange={(e) => setSymbolInput(e.target.value)}
-            placeholder="Symbol"
-            className="w-24 rounded border border-border bg-bg px-2 py-1 text-sm text-text outline-none focus:border-accent"
-          />
-          <datalist id="symbol-suggestions">
-            {SYMBOL_SUGGESTIONS.map((s) => (
-              <option key={s} value={s} />
-            ))}
-          </datalist>
-        </form>
+        <div ref={symbolSearchRef} className="relative">
+          <form onSubmit={loadChart}>
+            <input
+              id="symbol"
+              type="text"
+              value={symbolInput}
+              onChange={(e) => setSymbolInput(e.target.value)}
+              onFocus={() => {
+                setSymbolInput('')
+                setSymbolSearchOpen(true)
+              }}
+              placeholder={activeSymbol ?? 'Search symbol…'}
+              autoComplete="off"
+              className="w-40 rounded border border-border bg-bg px-2 py-1 text-sm text-text outline-none focus:border-accent"
+            />
+          </form>
+          {symbolSearchOpen && (symbolResults.length > 0 || symbolSearchLoading) && (
+            <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-md border border-border bg-surface p-1 shadow-lg">
+              {symbolSearchLoading && (
+                <p className="px-2 py-1.5 text-xs text-text-muted">Searching…</p>
+              )}
+              {!symbolSearchLoading &&
+                symbolResults.map((r) => (
+                  <button
+                    key={`${r.symbol}-${r.exchange}`}
+                    type="button"
+                    onClick={() => selectSymbol(r.symbol)}
+                    className="flex w-full flex-col items-start rounded px-2 py-1.5 text-left hover:bg-bg"
+                  >
+                    <span className="text-sm text-text">{r.symbol}</span>
+                    <span className="truncate text-xs text-text-muted">
+                      {r.name}
+                      {r.exchange ? ` · ${r.exchange}` : ''}
+                    </span>
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
 
         <div className="flex rounded border border-border p-0.5">
           {INTERVALS.map((i) => (
