@@ -5,3 +5,9 @@ export const STATUS_LABELS = {
   partial: 'Partial',
   closed: 'Closed',
 }
+
+export const IDEA_STATUS_LABELS = {
+  watching: 'Watching',
+  active: 'Active',
+  expired: 'Expired',
+}

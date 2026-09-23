@@ -1,21 +1,23 @@
 import { useState } from 'react'
 
-const emptyTrade = {
-  instrument: '',
-  direction: 'long',
-  entryDate: new Date().toISOString().slice(0, 10),
-  entryPrice: '',
-  shares: 100,
-  notes: '',
-  tags: '',
+function emptyTrade(initialInstrument) {
+  return {
+    instrument: initialInstrument ?? '',
+    direction: 'long',
+    entryDate: new Date().toISOString().slice(0, 10),
+    entryPrice: '',
+    shares: 100,
+    notes: '',
+    tags: '',
+  }
 }
 
-export function TradeDrawer({ trade, knownInstruments, onClose, onSave }) {
+export function TradeDrawer({ trade, knownInstruments, initialInstrument, onClose, onSave }) {
   const isEdit = Boolean(trade)
   const [form, setForm] = useState(() =>
     trade
       ? { ...trade, tags: (trade.tags ?? []).join(', ') }
-      : emptyTrade,
+      : emptyTrade(initialInstrument),
   )
   const [submitting, setSubmitting] = useState(false)
 
