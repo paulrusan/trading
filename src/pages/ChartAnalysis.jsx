@@ -17,6 +17,12 @@ const OUTPUT_SIZE_BY_INTERVAL = {
   '1day': 5000,
   '1week': 5000,
 }
+const INDICATORS = [
+  { key: 'ema20', label: 'EMA 20' },
+  { key: 'ema50', label: 'EMA 50' },
+  { key: 'cci', label: 'CCI (14)' },
+]
+const DEFAULT_INDICATORS = { ema20: true, ema50: true, cci: true }
 
 export default function ChartAnalysis() {
   const api = useApi()
@@ -31,9 +37,8 @@ export default function ChartAnalysis() {
   const [error, setError] = useState('')
 
   const [candleType, setCandleType] = useState('heikinAshi')
-  const [showEma20, setShowEma20] = useState(true)
-  const [showEma50, setShowEma50] = useState(true)
-  const [showCci, setShowCci] = useState(true)
+  const [indicators, setIndicators] = useState(DEFAULT_INDICATORS)
+  const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false)
 
   const [messages, setMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
@@ -42,6 +47,26 @@ export default function ChartAnalysis() {
 
   const priceContainerRef = useRef(null)
   const chartRef = useRef(null)
+  const indicatorMenuRef = useRef(null)
+
+  const toggleIndicator = (key) => {
+    setIndicators((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const clearIndicators = () => {
+    setIndicators({ ema20: false, ema50: false, cci: false })
+  }
+
+  useEffect(() => {
+    if (!indicatorMenuOpen) return
+    const handleClickOutside = (e) => {
+      if (indicatorMenuRef.current && !indicatorMenuRef.current.contains(e.target)) {
+        setIndicatorMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [indicatorMenuOpen])
 
   const loadChart = async (e, overrideInterval) => {
     e?.preventDefault()
@@ -119,13 +144,13 @@ export default function ChartAnalysis() {
     candleSeries.setData(displayCandles)
     series.push(candleSeries)
 
-    if (showEma20) {
+    if (indicators.ema20) {
       const ema20Series = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, 0)
       ema20Series.setData(computeEMA(candles, 20))
       series.push(ema20Series)
     }
 
-    if (showEma50) {
+    if (indicators.ema50) {
       const ema50Series = chart.addSeries(
         LineSeries,
         { color: colors.textMuted, lineWidth: 1 },
@@ -135,7 +160,7 @@ export default function ChartAnalysis() {
       series.push(ema50Series)
     }
 
-    if (showCci) {
+    if (indicators.cci) {
       const cciSeries = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, 1)
       cciSeries.setData(computeCCI(candles, 14))
       series.push(cciSeries)
@@ -146,7 +171,7 @@ export default function ChartAnalysis() {
     return () => {
       for (const s of series) chart.removeSeries(s)
     }
-  }, [candles, colors, candleType, showEma20, showEma50, showCci])
+  }, [candles, colors, candleType, indicators])
 
   const send = async (text) => {
     if (!text.trim() || sending || candles.length === 0) return
@@ -192,8 +217,8 @@ export default function ChartAnalysis() {
     <div className="p-4 sm:p-6">
       {error && <p className="mb-4 text-sm text-loss">{error}</p>}
 
-      <div className="relative mb-3">
-        <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface/90 px-2 py-1.5 backdrop-blur-sm">
+      <div className="relative mb-6">
+        <div className="absolute left-3 top-3 z-20 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface/90 px-2 py-1.5 backdrop-blur-sm">
           <form onSubmit={loadChart} className="flex items-center gap-1.5">
             <input
               id="symbol"
@@ -226,63 +251,86 @@ export default function ChartAnalysis() {
             ))}
           </div>
 
+          <div className="flex rounded border border-border p-0.5">
+            <button
+              type="button"
+              onClick={() => setCandleType('simple')}
+              className={`rounded px-2 py-1 text-xs ${
+                candleType === 'simple' ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
+              }`}
+            >
+              Simple
+            </button>
+            <button
+              type="button"
+              onClick={() => setCandleType('heikinAshi')}
+              className={`rounded px-2 py-1 text-xs ${
+                candleType === 'heikinAshi'
+                  ? 'bg-accent text-white'
+                  : 'text-text-muted hover:text-text'
+              }`}
+            >
+              Heikin Ashi
+            </button>
+          </div>
+
+          <div ref={indicatorMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setIndicatorMenuOpen((v) => !v)}
+              className="rounded border border-border px-2 py-1 text-xs text-text-muted hover:text-text"
+            >
+              Indicators ▾
+            </button>
+            {indicatorMenuOpen && (
+              <div className="absolute left-0 top-full z-20 mt-1 w-40 rounded-md border border-border bg-surface p-2 shadow-lg">
+                {INDICATORS.map((ind) => (
+                  <label
+                    key={ind.key}
+                    className="flex items-center gap-1.5 rounded px-1 py-1 text-xs text-text-muted hover:text-text"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={indicators[ind.key]}
+                      onChange={() => toggleIndicator(ind.key)}
+                      className="accent-accent"
+                    />
+                    {ind.label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={clearIndicators}
+            title="Clear all indicators"
+            aria-label="Clear all indicators"
+            className="rounded border border-border p-1.5 text-text-muted hover:text-loss"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-3.5 w-3.5"
+            >
+              <path d="M3 6h18" />
+              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+            </svg>
+          </button>
+
           {loading && <span className="text-xs text-text-muted">Loading…</span>}
         </div>
 
         <div ref={priceContainerRef} className="overflow-hidden rounded-lg border border-border" />
-      </div>
-
-      <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-        <div className="flex rounded-md border border-border p-0.5">
-          <button
-            type="button"
-            onClick={() => setCandleType('simple')}
-            className={`rounded px-3 py-1 ${
-              candleType === 'simple' ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
-            }`}
-          >
-            Simple
-          </button>
-          <button
-            type="button"
-            onClick={() => setCandleType('heikinAshi')}
-            className={`rounded px-3 py-1 ${
-              candleType === 'heikinAshi'
-                ? 'bg-accent text-white'
-                : 'text-text-muted hover:text-text'
-            }`}
-          >
-            Heikin Ashi
-          </button>
-        </div>
-
-        <label className="flex items-center gap-1.5 text-text-muted">
-          <input
-            type="checkbox"
-            checked={showEma20}
-            onChange={(e) => setShowEma20(e.target.checked)}
-            className="accent-accent"
-          />
-          EMA 20
-        </label>
-        <label className="flex items-center gap-1.5 text-text-muted">
-          <input
-            type="checkbox"
-            checked={showEma50}
-            onChange={(e) => setShowEma50(e.target.checked)}
-            className="accent-accent"
-          />
-          EMA 50
-        </label>
-        <label className="flex items-center gap-1.5 text-text-muted">
-          <input
-            type="checkbox"
-            checked={showCci}
-            onChange={(e) => setShowCci(e.target.checked)}
-            className="accent-accent"
-          />
-          CCI (14)
-        </label>
       </div>
 
       <div className="rounded-lg border border-border bg-surface p-4">
