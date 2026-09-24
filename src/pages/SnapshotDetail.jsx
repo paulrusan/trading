@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { TwelveDataChart } from '../components/TwelveDataChart'
 import { useApi } from '../hooks/useApi'
-import { computeCCI, computeSMA } from '../lib/indicators'
+import { computeCCI, computeParabolicSAR, computeSMA } from '../lib/indicators'
 import { describeCondition, POSITION_LABEL, SIGNAL_LABEL, SIGNAL_MARKER, SIGNAL_STYLE } from '../lib/signalLabels'
 
 const OUTPUT_SIZE_BY_INTERVAL = { '1h': 2000, '4h': 2000, '1day': 5000, '1week': 5000 }
@@ -106,16 +106,27 @@ export default function SnapshotDetail() {
 
   const latest = snapshots[snapshots.length - 1]
 
-  // Chart's own indicators, always CCI(20) + SMA(200) here since those are exactly what
-  // drives the signal shown below — not the general user-configurable dropdown from
-  // ChartAnalysis.jsx.
+  // Chart's own indicators, always CCI(20) + SMA(200) + SAR here since those are exactly
+  // what drives the signal shown below (entry/regime/exit) — not the general
+  // user-configurable dropdown from ChartAnalysis.jsx.
   const indicators = useMemo(() => {
     if (candles.length === 0) return {}
     return {
       cci: { period: 20, points: computeCCI(candles, 20) },
       sma: { period: 200, points: computeSMA(candles, 200) },
+      sar: { points: computeParabolicSAR(candles) },
     }
   }, [candles])
+
+  // Real candle index for each trade's entry/exit, so duration can be shown in bars
+  // (candles) as well as hours — hours alone is misleading once weekend/holiday gaps
+  // are involved, since "24 hours" isn't the same number of bars on every symbol.
+  const candleIndexByTime = useMemo(() => new Map(candles.map((c, i) => [c.time, i])), [candles])
+  function candleCount(fromIso, toIso) {
+    const fromIdx = candleIndexByTime.get(toUnixSeconds(fromIso))
+    const toIdx = candleIndexByTime.get(toUnixSeconds(toIso))
+    return fromIdx !== undefined && toIdx !== undefined ? toIdx - fromIdx : null
+  }
 
   // One marker per signal event (every CCI zero-line crossing) — buy/short as arrows
   // into the bar, exit_long/exit_short as an "X" on the opposite side.
@@ -128,7 +139,7 @@ export default function SnapshotDetail() {
       }))
   }, [snapshots])
 
-  const recentTrades = trends.slice(-3).reverse()
+  const recentTrades = trends.slice(-10).reverse()
   const avgTradeHours =
     recentTrades.length > 0
       ? recentTrades.reduce((sum, t) => sum + hoursBetween(t.startTime, t.endTime), 0) / recentTrades.length
@@ -177,11 +188,12 @@ export default function SnapshotDetail() {
       </div>
 
       <p className="mb-3 text-xs text-text-muted">
-        Price above SMA(200) is an uptrend, below it a downtrend. Every time CCI(20)
-        crosses the zero line, that's a signal — up-cross in an uptrend enters a long
-        (green arrow), down-cross in an uptrend exits it (green ✕); down-cross in a
-        downtrend enters a short (red arrow), up-cross in a downtrend exits it (red ✕).
-        Every crossing produces a signal — none are filtered out.
+        Price above SMA(200) is an uptrend, below it a downtrend. CCI(20) crossing the
+        zero line is the entry — up-cross in an uptrend enters a long (green arrow),
+        down-cross in a downtrend enters a short (red arrow). Parabolic SAR is the exit —
+        a long exits when price crosses below the SAR dots (green ✕), a short exits when
+        price crosses above them (red ✕). CCI crossings while a position is already open
+        are ignored; only the SAR flip closes it.
       </p>
 
       {runStatus && <p className="mb-3 text-xs text-text-muted">{runStatus}</p>}
@@ -218,6 +230,9 @@ export default function SnapshotDetail() {
               </p>
               <p className="text-text-muted">
                 SMA(200) <span className="text-text">{latest.indicators?.sma200?.toFixed(4) ?? '—'}</span>
+              </p>
+              <p className="text-text-muted">
+                SAR <span className="text-text">{latest.indicators?.sar?.toFixed(4) ?? '—'}</span>
               </p>
               {elapsedHours !== null && (
                 <p className="text-text-muted">
@@ -279,7 +294,7 @@ export default function SnapshotDetail() {
       </div>
 
       <div className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="mb-3 text-sm font-medium text-text-muted">Previous 3 trades</h2>
+        <h2 className="mb-3 text-sm font-medium text-text-muted">Previous {recentTrades.length || 10} trades</h2>
         {recentTrades.length === 0 ? (
           <p className="text-sm text-text-muted">No closed trades yet.</p>
         ) : (
@@ -288,27 +303,37 @@ export default function SnapshotDetail() {
               <thead>
                 <tr className="text-xs text-text-muted">
                   <th className="pb-2 pr-4 font-normal">Direction</th>
-                  <th className="pb-2 pr-4 font-normal">Entry</th>
-                  <th className="pb-2 pr-4 font-normal">Exit</th>
+                  <th className="pb-2 pr-4 font-normal">Entry price</th>
+                  <th className="pb-2 pr-4 font-normal">Entry time</th>
+                  <th className="pb-2 pr-4 font-normal">Exit price</th>
+                  <th className="pb-2 pr-4 font-normal">Exit time</th>
                   <th className="pb-2 pr-4 font-normal">Duration</th>
                   <th className="pb-2 font-normal">P/L</th>
                 </tr>
               </thead>
               <tbody>
-                {recentTrades.map((t) => (
-                  <tr key={t.id} className="border-t border-border">
-                    <td className={`py-2 pr-4 ${t.direction === 'long' ? 'text-profit' : 'text-loss'}`}>
-                      {t.direction === 'long' ? 'Long' : 'Short'}
-                    </td>
-                    <td className="py-2 pr-4 text-text-muted">{new Date(t.startTime).toLocaleString()}</td>
-                    <td className="py-2 pr-4 text-text-muted">{new Date(t.endTime).toLocaleString()}</td>
-                    <td className="py-2 pr-4 text-text">{formatHours(hoursBetween(t.startTime, t.endTime))}</td>
-                    <td className={`py-2 ${t.movePct >= 0 ? 'text-profit' : 'text-loss'}`}>
-                      {t.movePct >= 0 ? '+' : ''}
-                      {t.movePct.toFixed(2)}%
-                    </td>
-                  </tr>
-                ))}
+                {recentTrades.map((t) => {
+                  const bars = candleCount(t.startTime, t.endTime)
+                  return (
+                    <tr key={t.id} className="border-t border-border">
+                      <td className={`py-2 pr-4 ${t.direction === 'long' ? 'text-profit' : 'text-loss'}`}>
+                        {t.direction === 'long' ? 'Long' : 'Short'}
+                      </td>
+                      <td className="py-2 pr-4 text-text">{t.startPrice}</td>
+                      <td className="py-2 pr-4 text-text-muted">{new Date(t.startTime).toLocaleString()}</td>
+                      <td className="py-2 pr-4 text-text">{t.endPrice}</td>
+                      <td className="py-2 pr-4 text-text-muted">{new Date(t.endTime).toLocaleString()}</td>
+                      <td className="py-2 pr-4 text-text">
+                        {formatHours(hoursBetween(t.startTime, t.endTime))}
+                        {bars !== null && <span className="text-text-muted"> ({bars} candles)</span>}
+                      </td>
+                      <td className={`py-2 ${t.movePct >= 0 ? 'text-profit' : 'text-loss'}`}>
+                        {t.movePct >= 0 ? '+' : ''}
+                        {t.movePct.toFixed(2)}%
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -316,9 +341,9 @@ export default function SnapshotDetail() {
       </div>
 
       <p className="mt-4 text-xs text-text-muted">
-        Signals: {SIGNAL_LABEL.buy} / {SIGNAL_LABEL.exit_long} in an uptrend (price above SMA(200)),{' '}
-        {SIGNAL_LABEL.short} / {SIGNAL_LABEL.exit_short} in a downtrend — each triggered by CCI(20) crossing the
-        zero line. See the Watchlist page for the full rule.
+        Signals: {SIGNAL_LABEL.buy}/{SIGNAL_LABEL.short} — CCI(20) crosses the zero line, gated by the
+        SMA(200) regime. {SIGNAL_LABEL.exit_long}/{SIGNAL_LABEL.exit_short} — price crosses the Parabolic SAR.
+        See the Watchlist page for the full rule.
       </p>
     </div>
   )

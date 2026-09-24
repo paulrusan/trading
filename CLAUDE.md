@@ -358,7 +358,7 @@ underlying market data is the same regardless of who's watching):
   interval: '1h' | '4h' | '1day' | '1week',
   timestamp: string,        // ISO, hourly
   price: number,
-  indicators: { cci: number, sma200: number | null },
+  indicators: { cci: number, sma200: number | null, sar: number | null },
   signal: 'buy' | 'short' | 'exit_long' | 'exit_short' | 'hold',
   regime: 'up' | 'down' | 'neutral',   // price vs SMA(200), recomputed every bar
   // Internal bookkeeping the engine needs across hourly runs — what's currently open, so
@@ -386,35 +386,37 @@ underlying market data is the same regardless of who's watching):
 { id: string, userId: string, symbol: string, dataSource: string, interval: string, createdAt: string }
 ```
 
-**Signal rule** (`api/src/computeSnapshot.js`) — **rewritten from the
-CCI(20)/SMA(200)-agreement rule below in "Trading Strategy Context" into an
-actual long/short trading system, per the user's spec**: price above
-SMA(200) is an uptrend, below it a downtrend; CCI(20) crossing the zero
-line is the trigger, and what a crossing means depends entirely on the
-regime at that moment:
-- up-regime, CCI crosses up → `buy` (enter long)
-- up-regime, CCI crosses down → `exit_long`
-- down-regime, CCI crosses down → `short` (enter short)
-- down-regime, CCI crosses up → `exit_short`
+**Signal rule** (`api/src/computeSnapshot.js`) — went through three
+iterations, each rewritten in response to real numbers, not guessed. The
+current version uses **one indicator for entries and a different one for
+exits**: price above SMA(200) is an uptrend, below it a downtrend; while
+**flat**, CCI(20) crossing the zero line is the entry, gated by the
+regime (up-regime + cross-up → `buy`, down-regime + cross-down →
+`short`); once a position is **open**, CCI crossings are ignored (not a
+new entry, just noise inside a trade already running) and the exit
+instead fires when price crosses the **Parabolic SAR** — a long exits
+(`exit_long`) when price drops below the SAR dots, a short exits
+(`exit_short`) when price rises above them.
 
-Every zero-line crossing produces one of these four signals — **nothing is
-filtered out as noise** (unlike the CCI(20)/SMA(200)-agreement rule this
-replaced, which rejected disagreeing crossings). The regime gate means an
-entry only ever fires in the direction of the 200-SMA trend, but an open
-position is always closed by the very next opposite-direction crossing,
-regardless of whether the regime has flipped too — so a trade's holding
-time is bounded by CCI(20) alone, not by also waiting for SMA(200) to
-catch up.
+**Why entries and exits use different indicators**: the previous version
+(all four transitions driven by CCI zero-crossings — see below) whipsawed
+badly, because CCI oscillates around zero constantly even inside a real
+trend. SAR is purpose-built for exits instead: it trails behind price and
+only flips on a structural reversal, so it holds through the small
+oscillations that were cutting winning trades short. CCI stays for
+entries since it's fast and confirms early — good for catching the start
+of a move, which SAR (needing a full reversal) would be late to.
 
-**Known tradeoff, not yet mitigated** — because every crossing fires,
-this whipsaws in choppy/range-bound conditions: back-tested against ~149
-days of real USD/CAD 1h data, it produced 304 signal events / 141 closed
-trades (vs. 19 flips for the SMA(200)-agreement rule it replaced), a 35.5%
-win rate, and a lot of very short round trips worth only a few basis
-points each — before spread/costs, which would likely erase the (already
-thin, ~+5.8% cumulative) edge entirely. The user's plan is to layer
-additional conditions on top of this base system next (see "Trading
-Strategy Context" below), rather than tune this rule further in isolation.
+**Prior iterations, back-tested against the same ~149 days of real
+USD/CAD 1h data before choosing what shipped**:
+1. CCI(14)/±100 (the original spec): 163 trend-flips.
+2. CCI(20) crossing zero, confirmed only when price agreed with SMA(200) — a trend *detector*, not a trading system: 19 flips, each a clean trend segment, but it only classified regime, it didn't produce entries/exits.
+3. CCI(20) zero-cross driving all four transitions (entry AND exit) once turned into an actual long/short system: 304 events / 141 closed trades, 35.5% win rate, ~+5.8% cumulative (pre-spread) — whipsawed badly, most trades worth only a few basis points.
+4. **CCI(20) entry / Parabolic SAR exit (current)**: 197 events / 98 closed trades, 50.0% win rate, ~+3.9% cumulative (pre-spread), ~22h average hold (vs. much shorter before). Win rate and hold time improved, but total edge is flat-to-slightly-worse than #3 — per-trade edge is nearly identical (~0.04% either way), it just takes fewer, chunkier trades to get there. SAR's default acceleration (step 0.02, max 0.2) trails fairly tight, which likely caps how much of a move it lets ride; not yet tuned.
+
+The user's plan is to layer additional conditions on top of this base
+system next (see "Trading Strategy Context" below) rather than tune this
+rule further in isolation for now.
 
 **Read endpoints**: `GET /api/snapshots` / `GET /api/trends`
 (`?symbol=&dataSource=&interval=&limit=`) are GET-only (system-written data,
@@ -441,29 +443,37 @@ every historical hourly bar. `/snapshot` (`SnapshotDetail.jsx`) triggers
 this automatically the first time it loads a symbol with no trend history
 yet, plus a manual "Backfill history" button.
 
-**Chart markers**: one per signal event (every CCI zero-line crossing, not
-just trend starts) — `buy`/`short` render as a green up-arrow / red
-down-arrow into the bar, `exit_long`/`exit_short` as a green/red "✕" on the
-opposite side, so an entry and its exit visually bracket one trade.
-`src/lib/signalLabels.js`'s `SIGNAL_MARKER` holds the shape/color/position
-per signal, consumed by both `SnapshotDetail.jsx` (building the `markers`
-array from `snapshots`) and `TwelveDataChart.jsx`'s `createSeriesMarkers`
-call (mapped through the same real-time -> index lookup as everything else
-in that component). The CCI pane also always draws a zero price line
-(`createPriceLine` on the CCI series) since it's the actual signal
-trigger, not just a reference level.
+**Chart markers**: one per signal event (every entry/exit, not just trend
+starts) — `buy`/`short` render as a green up-arrow / red down-arrow into
+the bar, `exit_long`/`exit_short` as a green/red "✕" on the opposite side,
+so an entry and its exit visually bracket one trade. `src/lib/signalLabels.js`'s
+`SIGNAL_MARKER` holds the shape/color/position per signal, consumed by
+both `SnapshotDetail.jsx` (building the `markers` array from `snapshots`)
+and `TwelveDataChart.jsx`'s `createSeriesMarkers` call (mapped through the
+same real-time -> index lookup as everything else in that component).
+
+**CCI pane**: rendered as a `BaselineSeries` (area style, not a plain
+line) — filled green above zero, red below it, baseline anchored at 0
+(`baseValue: { type: 'price', price: 0 }`) — plus a plain solid zero
+`createPriceLine` (not dashed), since the zero-line crossing is the
+entry trigger and the fill makes which side CCI is on visible at a
+glance. Every other oscillator pane (RSI/ATR/ADX) stays a plain
+`LineSeries`; only CCI got the area treatment.
 
 **Snapshot detail page** (`/snapshot?symbol=&dataSource=&interval=`,
 `SnapshotDetail.jsx`): opens in a new tab from a "View" link on each
-Watchlist row. Shows the price chart (with SMA(200) overlaid — the only
-overlay shown, so the chart's own price badge on the right edge stays
-singular rather than stacking one per indicator) with the signal markers
-above, current condition (signal/regime/position, CCI(20), SMA(200), how
-long the current position's been open, open P/L), an estimated trade
-duration (average of the last 3 closed trades vs. elapsed on the current
-one — explicitly framed as a rough average of past behavior, not a
-prediction), and a table of the previous 3 closed trades. `src/lib/signalLabels.js`
-holds the shared signal/position vocabulary (`SIGNAL_LABEL`, `SIGNAL_STYLE`,
+Watchlist row. Shows the price chart (SMA(200) and SAR overlaid, plus the
+CCI area pane) with the signal markers above, current condition
+(signal/regime/position, CCI(20), SMA(200), SAR, how long the current
+position's been open, open P/L), an estimated trade duration (average of
+the last 10 closed trades vs. elapsed on the current one — explicitly
+framed as a rough average of past behavior, not a prediction), and a
+table of the previous 10 closed trades (direction, entry price/time, exit
+price/time, duration in both hours and candle count — candle count matters
+because weekend/holiday gaps mean "N hours" isn't the same number of bars
+on every symbol, computed via a real-time -> candle-index lookup on the
+already-loaded candle history — and P/L). `src/lib/signalLabels.js` holds
+the shared signal/position vocabulary (`SIGNAL_LABEL`, `SIGNAL_STYLE`,
 `POSITION_LABEL`, `SIGNAL_MARKER`, `describeCondition`) so this page and
 the Watchlist list view stay consistent.
 
@@ -483,12 +493,13 @@ visible on this page, which always shows one).
   Analysis" above)
 
 **Note:** this is the original strategy spec, kept here for context. The
-Watchlist engine's actual signal rule has been rebuilt twice since — see
-"Watchlist" above for the rule that's actually implemented today (a real
-long/short system: SMA(200) sets the regime, CCI(20) zero-crossings are
-entries/exits, every crossing fires) and the empirical numbers behind each
-iteration. The user's stated plan is to add further conditions on top of
-this base system next — check here first before assuming this is final.
+Watchlist engine's actual signal rule has been rebuilt three times since —
+see "Watchlist" above for the rule that's actually implemented today (a
+real long/short system: SMA(200) sets the regime, CCI(20) zero-crossings
+are the entry, a Parabolic SAR flip is the exit) and the empirical numbers
+behind each iteration. The user's stated plan is to add further conditions
+on top of this base system next — check here first before assuming this
+is final.
 
 ## Phase 1 — Scaffold & Deploy
 1. Run in terminal (outside Claude Code):

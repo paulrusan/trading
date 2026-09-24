@@ -1,4 +1,4 @@
-import { computeCCI, computeSMA } from './lib/indicators.js'
+import { computeCCI, computeParabolicSAR, computeSMA } from './lib/indicators.js'
 
 const CCI_PERIOD = 20
 const MA_PERIOD = 200
@@ -8,23 +8,24 @@ function lastTwo(points) {
   return { prev: points[points.length - 2], curr: points[points.length - 1] }
 }
 
-// A real long/short trading rule, not just a trend detector:
+// A real long/short trading rule, using a different indicator for entries than for exits:
 //   - price vs SMA(200) sets the regime: above it is "up", below it is "down".
-//   - CCI(20) crossing the zero line is the trigger — but what a crossing MEANS
-//     depends entirely on the regime at that moment:
-//       up-regime,   CCI crosses up   -> enter long   (buy)
-//       up-regime,   CCI crosses down -> exit the long (exit_long)
-//       down-regime, CCI crosses down -> enter short  (short)
-//       down-regime, CCI crosses up   -> exit the short (exit_short)
-// Every zero-line crossing produces one of those four signals — none are filtered
-// out as noise the way the old SMA(200)-agreement rule rejected them. The regime
-// gate means an entry only ever fires in the direction of the 200-SMA trend, and
-// an open position is always closed by the *next* opposite crossing rather than
-// waiting for the regime to also flip, so a trade's holding time is bounded by
-// CCI(20) alone. position/positionStartTime/positionStartPrice are carried
-// forward on the snapshot doc so the next hourly run knows what (if anything) is
-// currently open.
-function stepSignal({ prevCci, currCci, price, sma200, timestamp, prevState }) {
+//   - CCI(20) crossing the zero line is the ENTRY trigger, gated by the regime — only
+//     while flat, an up-regime + CCI cross-up enters a long, a down-regime + CCI
+//     cross-down enters a short. CCI is fast and confirms early, good for timing the
+//     start of a move.
+//   - Parabolic SAR is the EXIT trigger — only while a position is open, a long exits
+//     when price crosses below the SAR dots, a short exits when price crosses above
+//     them. SAR trails the trend and only flips on a structural reversal, so it holds
+//     through the small oscillations that made CCI-based exits whipsaw (the previous
+//     version of this rule exited on every opposite CCI crossing, which cut winning
+//     trades short constantly — see CLAUDE.md's "Watchlist" section for the numbers).
+// CCI crossings that happen while a position is already open are ignored (not a new
+// entry, just noise inside a trade already running) — entries and exits are each only
+// evaluated in the position state they apply to. position/positionStartTime/
+// positionStartPrice are carried forward on the snapshot doc so the next hourly run
+// knows what (if anything) is currently open.
+function stepSignal({ prevCci, currCci, prevPrice, price, prevSar, currSar, sma200, timestamp, prevState }) {
   const { position, positionStartTime, positionStartPrice } = prevState
 
   const trendUp = sma200 != null && price > sma200
@@ -34,48 +35,50 @@ function stepSignal({ prevCci, currCci, price, sma200, timestamp, prevState }) {
   const crossedUp = prevCci <= 0 && currCci > 0
   const crossedDown = prevCci >= 0 && currCci < 0
 
+  const sarReady = prevSar != null && currSar != null
+  const sarFlippedDown = sarReady && prevPrice >= prevSar && price < currSar
+  const sarFlippedUp = sarReady && prevPrice <= prevSar && price > currSar
+
   let signal = 'hold'
   let nextPosition = position
   let nextPositionStartTime = positionStartTime
   let nextPositionStartPrice = positionStartPrice
   let closedTrade = null
 
-  if (crossedUp && trendUp) {
-    signal = 'buy'
-    nextPosition = 'long'
-    nextPositionStartTime = timestamp
-    nextPositionStartPrice = price
-  } else if (crossedDown && trendDown) {
-    signal = 'short'
-    nextPosition = 'short'
-    nextPositionStartTime = timestamp
-    nextPositionStartPrice = price
-  } else if (crossedDown && trendUp) {
+  if (position === 'flat') {
+    if (crossedUp && trendUp) {
+      signal = 'buy'
+      nextPosition = 'long'
+      nextPositionStartTime = timestamp
+      nextPositionStartPrice = price
+    } else if (crossedDown && trendDown) {
+      signal = 'short'
+      nextPosition = 'short'
+      nextPositionStartTime = timestamp
+      nextPositionStartPrice = price
+    }
+  } else if (position === 'long' && sarFlippedDown) {
     signal = 'exit_long'
-    if (position === 'long' && positionStartTime) {
-      closedTrade = {
-        direction: 'long',
-        startTime: positionStartTime,
-        endTime: timestamp,
-        startPrice: positionStartPrice,
-        endPrice: price,
-        movePct: ((price - positionStartPrice) / positionStartPrice) * 100,
-      }
+    closedTrade = {
+      direction: 'long',
+      startTime: positionStartTime,
+      endTime: timestamp,
+      startPrice: positionStartPrice,
+      endPrice: price,
+      movePct: ((price - positionStartPrice) / positionStartPrice) * 100,
     }
     nextPosition = 'flat'
     nextPositionStartTime = null
     nextPositionStartPrice = null
-  } else if (crossedUp && trendDown) {
+  } else if (position === 'short' && sarFlippedUp) {
     signal = 'exit_short'
-    if (position === 'short' && positionStartTime) {
-      closedTrade = {
-        direction: 'short',
-        startTime: positionStartTime,
-        endTime: timestamp,
-        startPrice: positionStartPrice,
-        endPrice: price,
-        movePct: ((positionStartPrice - price) / positionStartPrice) * 100,
-      }
+    closedTrade = {
+      direction: 'short',
+      startTime: positionStartTime,
+      endTime: timestamp,
+      startPrice: positionStartPrice,
+      endPrice: price,
+      movePct: ((positionStartPrice - price) / positionStartPrice) * 100,
     }
     nextPosition = 'flat'
     nextPositionStartTime = null
@@ -99,12 +102,19 @@ export function computeSnapshotUpdate(candles, prevSnapshot) {
   const aligned = lastTwo(cci)
   if (!aligned) return null
 
-  const price = candles[candles.length - 1].close
-  const time = candles[candles.length - 1].time
-  const nowIso = new Date(time * 1000).toISOString()
+  const sar = computeParabolicSAR(candles)
+  const timeToSar = new Map(sar.map((p) => [p.time, p.value]))
+
+  const prevCandle = candles[candles.length - 2]
+  const currCandle = candles[candles.length - 1]
+  const price = currCandle.close
+  const nowIso = new Date(currCandle.time * 1000).toISOString()
 
   const sma200 = computeSMA(candles, MA_PERIOD)
   const sma200Now = sma200[sma200.length - 1]?.value ?? null
+
+  const prevSarVal = prevCandle ? (timeToSar.get(prevCandle.time) ?? null) : null
+  const currSarVal = timeToSar.get(currCandle.time) ?? null
 
   const prevState = {
     position: prevSnapshot?.position ?? 'flat',
@@ -114,7 +124,10 @@ export function computeSnapshotUpdate(candles, prevSnapshot) {
   const step = stepSignal({
     prevCci: aligned.prev.value,
     currCci: aligned.curr.value,
+    prevPrice: prevCandle?.close ?? null,
     price,
+    prevSar: prevSarVal,
+    currSar: currSarVal,
     sma200: sma200Now,
     timestamp: nowIso,
     prevState,
@@ -124,7 +137,7 @@ export function computeSnapshotUpdate(candles, prevSnapshot) {
     snapshot: {
       timestamp: nowIso,
       price,
-      indicators: { cci: aligned.curr.value, sma200: sma200Now },
+      indicators: { cci: aligned.curr.value, sma200: sma200Now, sar: currSarVal },
       signal: step.signal,
       regime: step.regime,
       position: step.position,
@@ -141,10 +154,10 @@ export function computeSnapshotUpdate(candles, prevSnapshot) {
 // result is identical to what the live hourly engine would have produced had it been
 // running the entire time.
 //
-// Returns every bar where something happened (a non-'hold' signal — i.e. every CCI
-// zero-line crossing) plus the final bar (the current state) — not every single 'hold'
-// bar, which for a few thousand hourly candles would mean a few thousand near-identical
-// Cosmos writes for one on-demand action. `trends` are always complete, closed trades.
+// Returns every bar where something happened (an entry or exit) plus the final bar (the
+// current state) — not every single 'hold' bar, which for a few thousand hourly candles
+// would mean a few thousand near-identical Cosmos writes for one on-demand action.
+// `trends` are always complete, closed trades.
 export function backfillTrendHistory(candles) {
   const cci = computeCCI(candles, CCI_PERIOD)
   if (cci.length < 2) return { events: [], trends: [] }
@@ -152,6 +165,8 @@ export function backfillTrendHistory(candles) {
   const timeToCandle = new Map(candles.map((c) => [c.time, c]))
   const sma200 = computeSMA(candles, MA_PERIOD)
   const timeToSma200 = new Map(sma200.map((p) => [p.time, p.value]))
+  const sar = computeParabolicSAR(candles)
+  const timeToSar = new Map(sar.map((p) => [p.time, p.value]))
 
   let state = { position: 'flat', positionStartTime: null, positionStartPrice: null }
   const events = []
@@ -159,14 +174,20 @@ export function backfillTrendHistory(candles) {
 
   for (let i = 1; i < cci.length; i++) {
     const candle = timeToCandle.get(cci[i].time)
-    if (!candle) continue
+    const prevCandle = timeToCandle.get(cci[i - 1].time)
+    if (!candle || !prevCandle) continue
     const timestamp = new Date(candle.time * 1000).toISOString()
     const sma200Now = timeToSma200.get(candle.time) ?? null
+    const sarNow = timeToSar.get(candle.time) ?? null
+    const sarPrev = timeToSar.get(prevCandle.time) ?? null
 
     const step = stepSignal({
       prevCci: cci[i - 1].value,
       currCci: cci[i].value,
+      prevPrice: prevCandle.close,
       price: candle.close,
+      prevSar: sarPrev,
+      currSar: sarNow,
       sma200: sma200Now,
       timestamp,
       prevState: state,
@@ -183,7 +204,7 @@ export function backfillTrendHistory(candles) {
       events.push({
         timestamp,
         price: candle.close,
-        indicators: { cci: cci[i].value, sma200: sma200Now },
+        indicators: { cci: cci[i].value, sma200: sma200Now, sar: sarNow },
         signal: step.signal,
         regime: step.regime,
         position: step.position,

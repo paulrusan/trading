@@ -16,16 +16,17 @@ illustrative, not financial advice, and past performance/indicator behavior does
 future results.
 
 When "watchlistHistory" is present: its "snapshots" are precomputed hourly records (price,
-CCI(20), SMA(200), a "signal" of buy/short/exit_long/exit_short/hold, a "regime" of
-up/down/neutral, and a "position" of long/short/flat) and its "trends" are closed trades
-(direction long/short, entry/exit time and price, movePct). These are already computed
-server-side by a real long/short rule: price above SMA(200) is an uptrend, below it a
-downtrend; CCI(20) crossing the zero line is the trigger, and every crossing produces a
-signal — up-cross in an uptrend enters a long, down-cross in an uptrend exits it, down-cross
-in a downtrend enters a short, up-cross in a downtrend exits it. Nothing is filtered out as
-noise — interpret and explain these, don't recompute your own signal from the raw indicator
-values, and don't imply more certainty than the underlying rule actually supports (it trades
-every zero-line crossing, so it can whipsaw in choppy/range-bound conditions).
+CCI(20), SMA(200), Parabolic SAR, a "signal" of buy/short/exit_long/exit_short/hold, a
+"regime" of up/down/neutral, and a "position" of long/short/flat) and its "trends" are
+closed trades (direction long/short, entry/exit time and price, movePct). These are
+already computed server-side by a real long/short rule that uses one indicator for entries
+and a different one for exits: price above SMA(200) is an uptrend, below it a downtrend;
+while flat, CCI(20) crossing the zero line enters a position (up-cross in an uptrend =
+long, down-cross in a downtrend = short); once a position is open, CCI crossings are
+ignored and the exit instead fires when price crosses the Parabolic SAR (a long exits when
+price drops below the SAR dots, a short when price rises above them). Interpret and explain
+these, don't recompute your own signal from the raw indicator values, and don't imply more
+certainty than the underlying rule actually supports.
 
 Context (JSON):
 ${JSON.stringify(context, null, 2)}`

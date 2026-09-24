@@ -1,4 +1,5 @@
 import {
+  BaselineSeries,
   CandlestickSeries,
   HistogramSeries,
   LineSeries,
@@ -7,7 +8,7 @@ import {
   createSeriesMarkers,
 } from 'lightweight-charts'
 import { useEffect, useRef } from 'react'
-import { getChartColors, usePrefersDark } from '../lib/chartColors'
+import { getChartColors, usePrefersDark, withAlpha } from '../lib/chartColors'
 import { toHeikinAshi } from '../lib/indicators'
 
 const OSCILLATOR_ORDER = ['cci', 'rsi', 'macd', 'atr', 'stoch', 'adx']
@@ -234,22 +235,40 @@ export function TwelveDataChart({
       const enabledOscillators = OSCILLATOR_ORDER.filter((key) => indicators[key])
       enabledOscillators.forEach((key, idx) => {
         const paneIndex = idx + 1
-        if (key === 'cci' || key === 'rsi' || key === 'atr' || key === 'adx') {
+        if (key === 'cci') {
+          // Area style (BaselineSeries), not a plain line: fills green above zero, red
+          // below it, since the zero-line crossing IS the entry trigger (see
+          // computeSnapshot.js) — the fill makes which side CCI is on visible at a
+          // glance, not just inferable from a wiggly line. The zero line itself is a
+          // plain solid reference line, not dashed/dotted.
+          const s = chart.addSeries(
+            BaselineSeries,
+            {
+              baseValue: { type: 'price', price: 0 },
+              topLineColor: colors.profit,
+              topFillColor1: withAlpha(colors.profit, 0.28),
+              topFillColor2: withAlpha(colors.profit, 0.05),
+              bottomLineColor: colors.loss,
+              bottomFillColor1: withAlpha(colors.loss, 0.05),
+              bottomFillColor2: withAlpha(colors.loss, 0.28),
+              lineWidth: 1,
+            },
+            paneIndex,
+          )
+          s.setData(reindex(indicators.cci.points))
+          hitTestSeries.push({ key: 'cci', series: s })
+          s.createPriceLine({
+            price: 0,
+            color: colors.textMuted,
+            lineWidth: 1,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: '',
+          })
+        } else if (key === 'rsi' || key === 'atr' || key === 'adx') {
           const s = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
           s.setData(reindex(indicators[key].points))
           hitTestSeries.push({ key, series: s })
-          // CCI's zero line is the actual signal trigger (see computeSnapshot.js) —
-          // always show it so a crossing is visible at a glance, not just inferable.
-          if (key === 'cci') {
-            s.createPriceLine({
-              price: 0,
-              color: colors.textMuted,
-              lineWidth: 1,
-              lineStyle: LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: '',
-            })
-          }
         } else if (key === 'macd') {
           const macdSeries = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
           macdSeries.setData(reindex(indicators.macd.macdLine))

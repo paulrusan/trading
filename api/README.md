@@ -112,32 +112,28 @@ queries every `watchlist` entry across all users, dedupes by
 candles once per group (Twelve Data's documented max, 5000 — the SMA(200)
 below needs that much headroom to warm up), and derives a `signal`
 (`buy`/`short`/`exit_long`/`exit_short`/`hold`) from a real long/short
-trading rule: **price above the 200-period SMA is an uptrend, below it a
-downtrend; CCI(20) crossing the zero line is the trigger, and what a
-crossing means depends on the regime at that moment** — up-regime +
-cross-up enters a long, up-regime + cross-down exits it, down-regime +
-cross-down enters a short, down-regime + cross-up exits it. Every crossing
-fires one of these four signals; none are filtered out as noise.
-`src/computeSnapshot.js` is a small state machine, not just a one-shot
-calculation, since an exit needs to know *what's currently open* (and its
-entry time/price) to close it correctly. That position (`long`/`short`/
-`flat`) and its start time/price are carried forward as extra fields on
-each `snapshots` document specifically so the next hourly run can read
-them back.
+trading rule that uses **one indicator for entries and a different one for
+exits**: price above the 200-period SMA is an uptrend, below it a
+downtrend; while **flat**, CCI(20) crossing the zero line is the entry,
+gated by the regime (up-regime + cross-up = `buy`, down-regime +
+cross-down = `short`); once a position is **open**, CCI crossings are
+ignored and the exit instead fires when price crosses the **Parabolic
+SAR** (a long exits when price drops below the SAR dots, a short when
+price rises above them). `src/computeSnapshot.js` is a small state
+machine, not just a one-shot calculation, since an exit needs to know
+*what's currently open* (and its entry time/price) to close it correctly.
+That position (`long`/`short`/`flat`) and its start time/price are carried
+forward as extra fields on each `snapshots` document specifically so the
+next hourly run can read them back.
 
-This rule went through two iterations, both tuned against real data, not
-guessed — CCI(20) crossing zero unfiltered was tried first and found
-*noisier* than the original CCI(14)/±100 rule (326 vs. 163 flips over ~149
-days of real USD/CAD 1h data); adding an SMA(200) *agreement* filter (only
-confirming a crossing when price already agreed with the SMA side) cut
-that to 19 clean trend segments — but that rule only detected trend
-direction, it didn't trade it. The current rule turns it into an actual
-long/short system instead of filtering crossings out: every crossing
-still fires, but what it means (entry vs. exit) depends on the regime.
-Back-tested on the same data: 304 events / 141 closed trades, 35.5% win
-rate, ~+5.8% cumulative (pre-spread) — it whipsaws in choppy conditions,
-a known, not-yet-mitigated tradeoff. See CLAUDE.md's "Watchlist" section
-for the full numbers.
+This rule went through several iterations, all tuned against real data,
+not guessed:
+1. CCI(20) crossing zero unfiltered — *noisier* than the original CCI(14)/±100 rule (326 vs. 163 flips over ~149 days of real USD/CAD 1h data).
+2. Adding an SMA(200) *agreement* filter (only confirming a crossing when price already agreed with the SMA side) cut that to 19 clean trend segments — but that only detected trend direction, it didn't trade it.
+3. Turning it into an actual long/short system with CCI driving both entries AND exits: 304 events / 141 closed trades, 35.5% win rate, ~+5.8% cumulative (pre-spread) — whipsawed badly, most round trips worth only a few basis points.
+4. **Current: CCI entry / Parabolic SAR exit** — 197 events / 98 closed trades, 50.0% win rate, ~+3.9% cumulative (pre-spread), ~22h average hold. Win rate and hold time improved, but total edge is flat-to-slightly-worse than #3 (per-trade edge is nearly identical either way — fewer, chunkier trades, not obviously bigger ones). SAR's default acceleration (step 0.02, max 0.2) isn't yet tuned.
+
+See CLAUDE.md's "Watchlist" section for the full numbers and reasoning.
 
 When a position is exited (`exit_long`/`exit_short`), the just-closed
 trade is also written to the `trends` container.
