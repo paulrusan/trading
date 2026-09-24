@@ -20,27 +20,138 @@ const INDICATORS = [
   { value: 'ema', label: 'Price crosses EMA', hasLevel: false, defaultPeriod: 20, defaultLevel: null },
 ]
 
+function emptyPriceCondition() {
+  return { type: 'price', priceLevel: '', priceDirection: 'above' }
+}
+
+function emptyIndicatorCondition() {
+  const def = INDICATORS[0]
+  return {
+    type: 'indicator',
+    indicatorKey: def.value,
+    indicatorPeriod: def.defaultPeriod,
+    indicatorLevel: def.defaultLevel,
+    indicatorDirection: 'above',
+  }
+}
+
 const EMPTY_FORM = {
   symbol: '',
   dataSource: 'twelvedata',
   interval: '1day',
-  type: 'price',
-  priceLevel: '',
-  priceDirection: 'above',
-  indicatorKey: 'cci',
-  indicatorPeriod: 14,
-  indicatorLevel: 100,
-  indicatorDirection: 'above',
+  matchMode: 'all',
+  conditions: [emptyPriceCondition()],
+}
+
+function describeCondition(condition) {
+  if (condition.type === 'price') {
+    return `Price crosses ${condition.priceDirection} ${condition.priceLevel}`
+  }
+  const def = INDICATORS.find((i) => i.value === condition.indicatorKey)
+  const label = def?.label ?? condition.indicatorKey
+  if (!def?.hasLevel) return `${label}, ${condition.indicatorDirection}`
+  return `${label}(${condition.indicatorPeriod}) crosses ${condition.indicatorDirection} ${condition.indicatorLevel}`
 }
 
 function describeAlert(alert) {
-  if (alert.type === 'price') {
-    return `Price crosses ${alert.priceDirection} ${alert.priceLevel}`
+  const joiner = alert.matchMode === 'any' ? ' OR ' : ' AND '
+  return alert.conditions.map(describeCondition).join(joiner)
+}
+
+function ConditionRow({ condition, onChange, onRemove, canRemove }) {
+  const selectedIndicator = INDICATORS.find((i) => i.value === condition.indicatorKey)
+
+  const handleIndicatorChange = (value) => {
+    const def = INDICATORS.find((i) => i.value === value)
+    onChange({
+      ...condition,
+      indicatorKey: value,
+      indicatorPeriod: def?.defaultPeriod ?? condition.indicatorPeriod,
+      indicatorLevel: def?.defaultLevel ?? condition.indicatorLevel,
+    })
   }
-  const def = INDICATORS.find((i) => i.value === alert.indicatorKey)
-  const label = def?.label ?? alert.indicatorKey
-  if (!def?.hasLevel) return `${label}, ${alert.indicatorDirection}`
-  return `${label}(${alert.indicatorPeriod}) crosses ${alert.indicatorDirection} ${alert.indicatorLevel}`
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-bg p-3">
+      {condition.type === 'price' ? (
+        <>
+          <span className="text-sm text-text-muted">Price crosses</span>
+          <select
+            value={condition.priceDirection}
+            onChange={(e) => onChange({ ...condition, priceDirection: e.target.value })}
+            className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          >
+            <option value="above">above</option>
+            <option value="below">below</option>
+          </select>
+          <input
+            type="number"
+            step="any"
+            placeholder="Level"
+            value={condition.priceLevel}
+            onChange={(e) => onChange({ ...condition, priceLevel: e.target.value })}
+            className="w-32 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </>
+      ) : (
+        <>
+          <select
+            value={condition.indicatorKey}
+            onChange={(e) => handleIndicatorChange(e.target.value)}
+            className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          >
+            {INDICATORS.map((i) => (
+              <option key={i.value} value={i.value}>
+                {i.label}
+              </option>
+            ))}
+          </select>
+
+          {condition.indicatorKey !== 'macd' && (
+            <label className="flex items-center gap-1.5 text-sm text-text-muted">
+              Period
+              <input
+                type="number"
+                value={condition.indicatorPeriod}
+                onChange={(e) => onChange({ ...condition, indicatorPeriod: e.target.value })}
+                className="w-16 rounded-md border border-border bg-surface px-2 py-1 text-sm text-text outline-none focus:border-accent"
+              />
+            </label>
+          )}
+
+          <select
+            value={condition.indicatorDirection}
+            onChange={(e) => onChange({ ...condition, indicatorDirection: e.target.value })}
+            className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          >
+            <option value="above">crosses above</option>
+            <option value="below">crosses below</option>
+          </select>
+
+          {selectedIndicator?.hasLevel && (
+            <input
+              type="number"
+              step="any"
+              placeholder="Level"
+              value={condition.indicatorLevel}
+              onChange={(e) => onChange({ ...condition, indicatorLevel: e.target.value })}
+              className="w-24 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
+            />
+          )}
+        </>
+      )}
+
+      {canRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="ml-auto rounded border border-border px-2 py-1 text-xs text-loss hover:bg-surface"
+        >
+          Remove
+        </button>
+      )}
+    </div>
+  )
 }
 
 export default function Alerts() {
@@ -71,15 +182,20 @@ export default function Alerts() {
 
   const updateField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }))
 
-  const handleIndicatorChange = (value) => {
-    const def = INDICATORS.find((i) => i.value === value)
+  const updateCondition = (index, next) =>
     setForm((prev) => ({
       ...prev,
-      indicatorKey: value,
-      indicatorPeriod: def?.defaultPeriod ?? prev.indicatorPeriod,
-      indicatorLevel: def?.defaultLevel ?? prev.indicatorLevel,
+      conditions: prev.conditions.map((c, i) => (i === index ? next : c)),
     }))
-  }
+
+  const addCondition = (type) =>
+    setForm((prev) => ({
+      ...prev,
+      conditions: [...prev.conditions, type === 'price' ? emptyPriceCondition() : emptyIndicatorCondition()],
+    }))
+
+  const removeCondition = (index) =>
+    setForm((prev) => ({ ...prev, conditions: prev.conditions.filter((_, i) => i !== index) }))
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -91,20 +207,23 @@ export default function Alerts() {
         symbol: form.symbol.trim(),
         dataSource: form.dataSource,
         interval: form.interval,
-        type: form.type,
+        matchMode: form.matchMode,
+        conditions: form.conditions.map((c) =>
+          c.type === 'price'
+            ? { type: 'price', priceLevel: Number(c.priceLevel), priceDirection: c.priceDirection }
+            : {
+                type: 'indicator',
+                indicatorKey: c.indicatorKey,
+                indicatorPeriod: Number(c.indicatorPeriod) || undefined,
+                indicatorLevel: Number(c.indicatorLevel) || undefined,
+                indicatorDirection: c.indicatorDirection,
+              },
+        ),
         email: form.email,
         active: true,
         createdAt: new Date().toISOString(),
         lastTriggeredAt: null,
         lastTriggeredCandleTime: null,
-        ...(form.type === 'price'
-          ? { priceLevel: Number(form.priceLevel), priceDirection: form.priceDirection }
-          : {
-              indicatorKey: form.indicatorKey,
-              indicatorPeriod: Number(form.indicatorPeriod) || undefined,
-              indicatorLevel: Number(form.indicatorLevel) || undefined,
-              indicatorDirection: form.indicatorDirection,
-            }),
       }
       await api.saveAlert(payload)
       setForm({ ...EMPTY_FORM, email: user?.email ?? '' })
@@ -150,8 +269,6 @@ export default function Alerts() {
       setRunning(false)
     }
   }
-
-  const selectedIndicator = INDICATORS.find((i) => i.value === form.indicatorKey)
 
   return (
     <div className="mx-auto max-w-3xl p-4 sm:p-6">
@@ -204,94 +321,48 @@ export default function Alerts() {
             </select>
           </div>
 
-          <div className="flex rounded-md border border-border p-0.5" style={{ width: 'fit-content' }}>
-            <button
-              type="button"
-              onClick={() => updateField('type', 'price')}
-              className={`rounded px-3 py-1 text-sm ${
-                form.type === 'price' ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
-              }`}
-            >
-              Price
-            </button>
-            <button
-              type="button"
-              onClick={() => updateField('type', 'indicator')}
-              className={`rounded px-3 py-1 text-sm ${
-                form.type === 'indicator' ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
-              }`}
-            >
-              Indicator
-            </button>
+          <div className="flex flex-col gap-2">
+            {form.conditions.map((condition, index) => (
+              <ConditionRow
+                key={index}
+                condition={condition}
+                onChange={(next) => updateCondition(index, next)}
+                onRemove={() => removeCondition(index)}
+                canRemove={form.conditions.length > 1}
+              />
+            ))}
           </div>
 
-          {form.type === 'price' ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm text-text-muted">Price crosses</span>
-              <select
-                value={form.priceDirection}
-                onChange={(e) => updateField('priceDirection', e.target.value)}
-                className="rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none focus:border-accent"
-              >
-                <option value="above">above</option>
-                <option value="below">below</option>
-              </select>
-              <input
-                type="number"
-                step="any"
-                placeholder="Level"
-                value={form.priceLevel}
-                onChange={(e) => updateField('priceLevel', e.target.value)}
-                className="w-32 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none focus:border-accent"
-              />
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-3">
-              <select
-                value={form.indicatorKey}
-                onChange={(e) => handleIndicatorChange(e.target.value)}
-                className="rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none focus:border-accent"
-              >
-                {INDICATORS.map((i) => (
-                  <option key={i.value} value={i.value}>
-                    {i.label}
-                  </option>
-                ))}
-              </select>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => addCondition('price')}
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-muted hover:text-text"
+            >
+              + Price condition
+            </button>
+            <button
+              type="button"
+              onClick={() => addCondition('indicator')}
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-muted hover:text-text"
+            >
+              + Indicator condition
+            </button>
 
-              {form.indicatorKey !== 'macd' && (
-                <label className="flex items-center gap-1.5 text-sm text-text-muted">
-                  Period
-                  <input
-                    type="number"
-                    value={form.indicatorPeriod}
-                    onChange={(e) => updateField('indicatorPeriod', e.target.value)}
-                    className="w-16 rounded-md border border-border bg-bg px-2 py-1 text-sm text-text outline-none focus:border-accent"
-                  />
-                </label>
-              )}
-
-              <select
-                value={form.indicatorDirection}
-                onChange={(e) => updateField('indicatorDirection', e.target.value)}
-                className="rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none focus:border-accent"
-              >
-                <option value="above">crosses above</option>
-                <option value="below">crosses below</option>
-              </select>
-
-              {selectedIndicator?.hasLevel && (
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="Level"
-                  value={form.indicatorLevel}
-                  onChange={(e) => updateField('indicatorLevel', e.target.value)}
-                  className="w-24 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none focus:border-accent"
-                />
-              )}
-            </div>
-          )}
+            {form.conditions.length > 1 && (
+              <label className="ml-auto flex items-center gap-2 text-sm text-text-muted">
+                Require
+                <select
+                  value={form.matchMode}
+                  onChange={(e) => updateField('matchMode', e.target.value)}
+                  className="rounded-md border border-border bg-bg px-2 py-1 text-sm text-text outline-none focus:border-accent"
+                >
+                  <option value="all">All conditions (AND)</option>
+                  <option value="any">Any condition (OR)</option>
+                </select>
+              </label>
+            )}
+          </div>
 
           <input
             type="email"

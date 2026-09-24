@@ -43,9 +43,11 @@ read or write another user's data.
   useful for instruments not included in a given Twelve Data plan.
 - `GET/POST/DELETE /api/alerts` — CRUD over the `alerts` Cosmos container
   (partition key `/userId`). Each alert is `{ symbol, dataSource, interval,
-  type: 'price'|'indicator', ...condition fields, email, active,
-  lastTriggeredAt, lastTriggeredCandleTime }` — see `src/evaluateAlert.js`
-  for the exact condition shape per type/indicator.
+  matchMode: 'all'|'any', conditions: [...], email, active, lastTriggeredAt,
+  lastTriggeredCandleTime }` — an alert can carry multiple conditions
+  (price and/or indicator, mixed), combined with AND (`matchMode: 'all'`)
+  or OR (`matchMode: 'any'`) before edge-triggering. See
+  `src/evaluateAlert.js` for the exact condition shape per type/indicator.
 - `POST /api/alerts/run` — manually runs the same alert-checking logic the
   hourly timer runs (see below), for testing without waiting for the clock.
   Returns a summary: `{ alertsActive, groups, checked, triggered, failed }`.

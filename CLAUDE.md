@@ -136,15 +136,21 @@ trading-journal/
   symbol: string,
   dataSource: 'twelvedata' | 'yahoo',
   interval: '1h' | '4h' | '1day' | '1week',
-  type: 'price' | 'indicator',
-  // type === 'price'
-  priceLevel: number,
-  priceDirection: 'above' | 'below',
-  // type === 'indicator'
-  indicatorKey: 'cci' | 'rsi' | 'stoch' | 'macd' | 'ema',
-  indicatorPeriod: number | undefined,   // unused for 'macd' (fixed 12/26/9)
-  indicatorLevel: number | undefined,    // unused for 'macd'/'ema' (zero-cross / price-cross)
-  indicatorDirection: 'above' | 'below',
+  matchMode: 'all' | 'any',   // combinator across conditions[] — AND / OR — only matters when length > 1
+  conditions: [
+    {
+      type: 'price',
+      priceLevel: number,
+      priceDirection: 'above' | 'below',
+    } | {
+      type: 'indicator',
+      indicatorKey: 'cci' | 'rsi' | 'stoch' | 'macd' | 'ema',
+      indicatorPeriod: number | undefined,   // unused for 'macd' (fixed 12/26/9)
+      indicatorLevel: number | undefined,    // unused for 'macd'/'ema' (zero-cross / price-cross)
+      indicatorDirection: 'above' | 'below',
+    },
+    // ...one or more
+  ],
   email: string,
   active: boolean,
   createdAt: string,
@@ -152,6 +158,13 @@ trading-journal/
   lastTriggeredCandleTime: number | null,   // dedupes re-firing within the same bar
 }
 ```
+
+Multiple conditions on one alert are evaluated against the same candle set
+(same symbol/dataSource/interval) and combined per `matchMode` *before*
+edge-triggering — each condition's "currently met" state at the previous
+and current candle is computed, the states are AND'd or OR'd together, and
+the alert fires only on the transition from combined-not-met to
+combined-met. See `api/src/evaluateAlert.js`.
 
 All five containers (`trades`, `ideas`, `notes`, `settings`, `alerts`) live
 in Cosmos DB database `paultrading`, partitioned on `/userId`.
