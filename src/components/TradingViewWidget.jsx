@@ -64,11 +64,13 @@ export function TradingViewWidget({
   }, [symbol, interval, style, JSON.stringify(studies), JSON.stringify(studiesOverrides), theme, id])
 
   return (
-    <div
-      id={id}
-      ref={containerRef}
-      style={{ height }}
-      className="overflow-hidden rounded-lg border border-border"
-    />
+    <div className="relative overflow-hidden rounded-lg border border-border" style={{ height }}>
+      <div id={id} ref={containerRef} className="h-full w-full" />
+      {symbol && (
+        <div className="pointer-events-none absolute left-2 top-2 z-10 rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted">
+          {symbol}
+        </div>
+      )}
+    </div>
   )
 }
