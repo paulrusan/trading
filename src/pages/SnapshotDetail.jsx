@@ -127,14 +127,14 @@ export default function SnapshotDetail() {
       time: toUnixSeconds(t.startTime),
       color: t.direction === 'up' ? UP_COLOR : DOWN_COLOR,
       shape: t.direction === 'up' ? 'arrowUp' : 'arrowDown',
-      text: `${t.direction === 'up' ? 'Up' : 'Down'} trend start`,
+      text: `${t.direction === 'up' ? 'Up' : 'Down'} start (CCI)`,
     }))
     if (latest?.trendStartTime && latest.regime !== 'neutral') {
       result.push({
         time: toUnixSeconds(latest.trendStartTime),
         color: latest.regime === 'up' ? UP_COLOR : DOWN_COLOR,
         shape: latest.regime === 'up' ? 'arrowUp' : 'arrowDown',
-        text: 'Current trend start',
+        text: 'Current start (CCI)',
         position: 'belowBar',
       })
     }
@@ -186,6 +186,13 @@ export default function SnapshotDetail() {
           </button>
         </div>
       </div>
+
+      <p className="mb-3 text-xs text-text-muted">
+        Trend starts (arrows below) mark where CCI(14) crossed ±100 — the only indicator
+        driving these signals. CCI is a lagging momentum oscillator: it confirms a move only
+        after ~14 bars of price action have shifted its average, so a marker can sit well
+        after the price actually turned, not at the exact high/low.
+      </p>
 
       {runStatus && <p className="mb-3 text-xs text-text-muted">{runStatus}</p>}
       {error && <p className="mb-3 text-sm text-loss">{error}</p>}

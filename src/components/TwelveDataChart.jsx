@@ -152,32 +152,61 @@ export function TwelveDataChart({
       // double-click near a line can reopen that indicator's settings.
       const hitTestSeries = []
 
+      // lastValueVisible/priceLineVisible off on every price-pane overlay line below — only
+      // the candlestick series shows a price badge/line, otherwise each enabled overlay
+      // (EMA, SMA, Bollinger Bands, SAR) stacks its own duplicate badge on the right edge.
       if (indicators.ema) {
-        const s = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, 0)
+        const s = chart.addSeries(
+          LineSeries,
+          { color: colors.accent, lineWidth: 1, lastValueVisible: false, priceLineVisible: false },
+          0,
+        )
         s.setData(reindex(indicators.ema.points))
         hitTestSeries.push({ key: 'ema', series: s })
       }
       if (indicators.sma) {
         const s = chart.addSeries(
           LineSeries,
-          { color: colors.accent, lineWidth: 1, lineStyle: LineStyle.Dashed },
+          {
+            color: colors.accent,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            lastValueVisible: false,
+            priceLineVisible: false,
+          },
           0,
         )
         s.setData(reindex(indicators.sma.points))
         hitTestSeries.push({ key: 'sma', series: s })
       }
       if (indicators.bb) {
-        const basisSeries = chart.addSeries(LineSeries, { color: colors.textMuted, lineWidth: 1 }, 0)
+        const basisSeries = chart.addSeries(
+          LineSeries,
+          { color: colors.textMuted, lineWidth: 1, lastValueVisible: false, priceLineVisible: false },
+          0,
+        )
         basisSeries.setData(reindex(indicators.bb.basis))
         const upperSeries = chart.addSeries(
           LineSeries,
-          { color: colors.textMuted, lineWidth: 1, lineStyle: LineStyle.Dotted },
+          {
+            color: colors.textMuted,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dotted,
+            lastValueVisible: false,
+            priceLineVisible: false,
+          },
           0,
         )
         upperSeries.setData(reindex(indicators.bb.upper))
         const lowerSeries = chart.addSeries(
           LineSeries,
-          { color: colors.textMuted, lineWidth: 1, lineStyle: LineStyle.Dotted },
+          {
+            color: colors.textMuted,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dotted,
+            lastValueVisible: false,
+            priceLineVisible: false,
+          },
           0,
         )
         lowerSeries.setData(reindex(indicators.bb.lower))
@@ -188,7 +217,14 @@ export function TwelveDataChart({
       if (indicators.sar) {
         const s = chart.addSeries(
           LineSeries,
-          { color: colors.accent, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2 },
+          {
+            color: colors.accent,
+            lineVisible: false,
+            pointMarkersVisible: true,
+            pointMarkersRadius: 2,
+            lastValueVisible: false,
+            priceLineVisible: false,
+          },
           0,
         )
         s.setData(reindex(indicators.sar.points))
