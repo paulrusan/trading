@@ -45,9 +45,13 @@ read or write another user's data.
   (partition key `/userId`). Each alert is `{ symbol, dataSource, interval,
   matchMode: 'all'|'any', conditions: [...], email, active, lastTriggeredAt,
   lastTriggeredCandleTime }` — an alert can carry multiple conditions
-  (price and/or indicator, mixed), combined with AND (`matchMode: 'all'`)
-  or OR (`matchMode: 'any'`) before edge-triggering. See
-  `src/evaluateAlert.js` for the exact condition shape per type/indicator.
+  (`price`, `indicator`, and/or `haColor` — Heikin Ashi candle color — mixed
+  freely), combined with AND (`matchMode: 'all'`) or OR (`matchMode: 'any'`)
+  before edge-triggering. Each condition can also carry its own `interval`,
+  falling back to the alert's own — so one alert can combine a slow
+  permission timeframe (e.g. daily trend) with a fast trigger timeframe
+  (e.g. hourly candle color) in a single rule. See `src/evaluateAlert.js`
+  for the exact condition shape per type/indicator.
 - `POST /api/alerts/run` — manually runs the same alert-checking logic the
   hourly timer runs (see below), for testing without waiting for the clock.
   Returns a summary: `{ alertsActive, groups, checked, triggered, failed }`.
@@ -72,17 +76,36 @@ read or write another user's data.
 
 `src/functions/alertsEngine.js` registers an **hourly timer trigger**
 (`app.timer`, schedule `0 0 * * * *`) that: queries every `active` alert
-across all users, groups them by `(symbol, dataSource, interval)` so two
-users watching the same symbol only cost one market-data fetch, evaluates
-each alert's condition (`src/evaluateAlert.js`, using indicator math ported
-to `src/lib/indicators.js` — an exact copy of the frontend's
-`src/lib/indicators.js`, since those functions are pure with no browser
-dependencies), and emails via Gmail SMTP on a **crossing** (edge-triggered:
-fires once when a condition transitions from not-met to met, using the
-last two candles/indicator points — not every hour it stays true). Which
-bar most recently triggered an alert is tracked via
-`lastTriggeredCandleTime` so the same crossing doesn't re-fire every hour
-until a new bar actually arrives.
+across all users, groups them by `(symbol, dataSource)` (not also
+`interval` — a single alert's conditions can span more than one interval,
+so grouping happens one level up), computes the union of every interval
+any of that symbol's alerts' conditions need and fetches each one once
+into a `Map<interval, candles>`, evaluates each alert's conditions
+(`src/evaluateAlert.js`, each condition resolving its own interval's
+candles from that map; indicator math ported to `src/lib/indicators.js` —
+an exact copy of the frontend's `src/lib/indicators.js`, since those
+functions are pure with no browser dependencies), and emails via Gmail
+SMTP on a **crossing** (edge-triggered: fires once when the AND/OR-combined
+condition state transitions from not-met to met, using the last two
+candles/indicator points per condition — not every hour it stays true).
+Which bar most recently triggered an alert is tracked via
+`lastTriggeredCandleTime` (keyed off the alert's own primary interval, the
+fastest-moving one actually driving when it can fire) so the same crossing
+doesn't re-fire every hour until a new bar actually arrives.
+
+**`haColor` condition**: `{ type: 'haColor', haColor: 'green'|'red',
+interval }` — is the Heikin Ashi candle this color. It's a *state* check,
+not a "just flipped" check by itself; "first green after red" falls out
+naturally from the combined-condition edge-trigger above (the combined
+AND/OR state was false while the candle was red, becomes true the bar it
+turns green, and doesn't re-fire on subsequent green bars since that's not
+a new transition). Validated (see CLAUDE.md's "Alerts" section) as the
+1-hour entry trigger in a daily-trend-permission + hourly-trigger +
+hourly-CCI-confirmation alert — real USD/CAD backtesting showed pairing it
+with a 1h CCI(20)-above-zero condition roughly doubles the average forward
+return of the triggers it keeps, and the ones it rejects average a
+*negative* forward return (i.e. it's actually separating real bounces from
+fake ones, not just shrinking the sample).
 
 **Email**: `src/sendEmail.js` sends via Gmail SMTP using `nodemailer`
 (`service: 'gmail'`). Needs two app settings: `GMAIL_USER` (the Gmail

@@ -34,7 +34,7 @@ trading-journal/
 │   │   ├── crudRoutes.js              # generic CRUD factory for trades/ideas/notes/alerts/watchlist
 │   │   ├── marketDataFetchers.js      # fetchFromTwelveData/fetchFromYahoo, shared by
 │   │   │                              #   marketData.js and both hourly engines below
-│   │   ├── evaluateAlert.js           # edge-triggered condition evaluation for alerts
+│   │   ├── evaluateAlert.js           # edge-triggered, multi-interval condition evaluation for alerts
 │   │   ├── computeSnapshot.js         # CCI(20)/SMA(200) long/short signal state machine
 │   │   ├── sendEmail.js               # Gmail SMTP via nodemailer
 │   │   ├── lib/indicators.js          # server-side port of src/lib/indicators.js
@@ -142,19 +142,25 @@ trading-journal/
   userId: string,
   symbol: string,
   dataSource: 'twelvedata' | 'yahoo',
-  interval: '1h' | '4h' | '1day' | '1week',
+  interval: '1h' | '4h' | '1day' | '1week',   // the alert's own/primary interval — trigger-time dedup uses this one
   matchMode: 'all' | 'any',   // combinator across conditions[] — AND / OR — only matters when length > 1
   conditions: [
     {
       type: 'price',
       priceLevel: number,
       priceDirection: 'above' | 'below',
+      interval: '1h' | '4h' | '1day' | '1week' | undefined,  // falls back to the alert's own interval
     } | {
       type: 'indicator',
       indicatorKey: 'cci' | 'rsi' | 'stoch' | 'macd' | 'ema',
       indicatorPeriod: number | undefined,   // unused for 'macd' (fixed 12/26/9)
       indicatorLevel: number | undefined,    // unused for 'macd'/'ema' (zero-cross / price-cross)
       indicatorDirection: 'above' | 'below',
+      interval: '1h' | '4h' | '1day' | '1week' | undefined,
+    } | {
+      type: 'haColor',
+      haColor: 'green' | 'red',              // is the Heikin Ashi candle this color — a state, not a "just flipped" check
+      interval: '1h' | '4h' | '1day' | '1week' | undefined,
     },
     // ...one or more
   ],
@@ -171,12 +177,13 @@ See "Watchlist and the per-symbol snapshot/trend engine" below — schemas are
 defined there alongside the engine that writes them, since they're tightly
 coupled (unlike Alert, which is pure user input).
 
-Multiple conditions on one alert are evaluated against the same candle set
-(same symbol/dataSource/interval) and combined per `matchMode` *before*
-edge-triggering — each condition's "currently met" state at the previous
-and current candle is computed, the states are AND'd or OR'd together, and
-the alert fires only on the transition from combined-not-met to
-combined-met. See `api/src/evaluateAlert.js`.
+Multiple conditions on one alert can each run against a different interval
+(same symbol/dataSource, `condition.interval` falling back to the alert's
+own) and are combined per `matchMode` *before* edge-triggering — each
+condition's "currently met" state at the previous and current candle
+(within its own interval) is computed, the states are AND'd or OR'd
+together, and the alert fires only on the transition from combined-not-met
+to combined-met. See `api/src/evaluateAlert.js`.
 
 `trades`, `ideas`, `notes`, `settings`, `alerts`, and `watchlist` all live in
 Cosmos DB database `paultrading`, partitioned on `/userId`. `snapshots` and
@@ -306,26 +313,62 @@ provider's exact symbol format.
 ## Alerts (`/alerts`)
 
 Email alerts, evaluated hourly in the background — the first real piece of
-the "app does the heavy lifting, Claude only analyzes" direction. A user
-creates an alert (any symbol, either data source, either a price level or
-an indicator condition), and `api/src/functions/alertsEngine.js` — an
-**hourly timer trigger** (`app.timer`, `0 0 * * * *`) — checks every active
-alert across all users, grouping by `(symbol, dataSource, interval)` so two
-users watching the same symbol only cost one market-data fetch (this is the
-opt-in-watchlist cost-control idea below, just scoped to "what you've
-actually created an alert for" rather than a separate watchlist concept).
+the "app does the heavy lifting, Claude only analyzes" direction, and the
+right fit for "monitor many instruments and tell me only when it's worth
+opening my brokerage app" — not a simulated-trade system like the Watchlist
+below. A user creates an alert (any symbol, either data source, one or more
+conditions combined with `matchMode: 'all'` (AND) or `'any'` (OR)), and
+`api/src/functions/alertsEngine.js` — an **hourly timer trigger**
+(`app.timer`, `0 0 * * * *`) — checks every active alert across all users,
+grouping by `(symbol, dataSource)` (not also `interval` — see below) so two
+users watching the same symbol/interval only cost one market-data fetch
+(this is the opt-in-watchlist cost-control idea below, just scoped to "what
+you've actually created an alert for" rather than a separate watchlist
+concept).
 
-Conditions are **edge-triggered** (crossing detection using the last two
-candles/indicator points, not "is currently true") so an alert fires once
-per crossing instead of every hour a condition happens to still hold —
-tracked via `lastTriggeredCandleTime` on the alert doc. Indicator alerts
-reuse the exact same math as the chart: `api/src/lib/indicators.js` is a
-straight port of `src/lib/indicators.js` (pure functions, no browser
-dependencies, so no logic changed in the port). Email delivery is Gmail
-SMTP via `nodemailer` (`api/src/sendEmail.js`, `service: 'gmail'`), app
-settings `GMAIL_USER` + `GMAIL_APP_PASSWORD` (a Google App Password, not
-the account password — requires 2-Step Verification enabled on the
-account).
+**Conditions can each specify their own `interval`**, independent of the
+alert's own (falls back to the alert's interval when not set) — needed for
+alerts that combine a slow permission timeframe with a fast trigger
+timeframe in one rule (e.g. "daily trend up AND hourly candle just turned
+green" — see the worked example below). `alertsEngine.js` computes the
+union of every interval any of a symbol's active alerts' conditions need
+and fetches each one once; `evaluateAlert(alert, candlesByInterval)` takes
+a `Map<interval, candles>` rather than a single candle array, and resolves
+each condition against its own interval's candles.
+
+**Condition types** (`api/src/evaluateAlert.js`): `price` (crosses a
+level), `indicator` (`cci`/`rsi`/`stoch`/`macd`/`ema`, crosses a
+level/zero/its own EMA), and `haColor` (Heikin Ashi candle is a given
+color — a *state* check, not a "just flipped" check; relies on the
+combined-condition edge-trigger below to fire "first green after red"
+naturally). Indicator alerts reuse the exact same math as the chart:
+`api/src/lib/indicators.js` is a straight port of `src/lib/indicators.js`
+(pure functions, no browser dependencies, so no logic changed in the
+port).
+
+All conditions are **edge-triggered as a combined group** (crossing
+detection using the last two candles/indicator points per condition, then
+`!combine('prevMet') && combine('currMet')` on the AND/OR-combined result)
+so an alert fires once per crossing instead of every hour a condition
+happens to still hold — tracked via `lastTriggeredCandleTime` on the alert
+doc, keyed off the alert's own (primary) interval's latest candle time.
+
+**Worked example** (the rule actually validated for this — see the CCI/HA
+empirical testing further down this file's history/PR notes): symbol's
+alert `interval: '1h'`, three conditions —
+1. `indicator`, CCI(9), above 0, `interval: '1day'` — daily trend permission, pure CCI(9) sign (no candle color check — validated to already reject single fake-candle noise on its own).
+2. `haColor`, green, `interval: '1h'` — the actual entry timing trigger (first green after red, via the edge-trigger above).
+3. `indicator`, CCI(20), above 0, `interval: '1h'` — confirms the 1h bounce is real rather than a fake one-candle wobble; validated against real data to roughly double the average forward return and flip the rejected group's average return negative (i.e. it's actually separating winners from fakes, not just shrinking the sample).
+
+`matchMode: 'all'`. Mirror with `below`/red for the short side. This is
+notify-only by design — the user checks a 1-5 minute chart manually and
+picks the exact entry themselves; the alert's job is only to say "look
+now."
+
+Email delivery is Gmail SMTP via `nodemailer` (`api/src/sendEmail.js`,
+`service: 'gmail'`), app settings `GMAIL_USER` + `GMAIL_APP_PASSWORD` (a
+Google App Password, not the account password — requires 2-Step
+Verification enabled on the account).
 
 Because a timer trigger is painful to test locally (see `api/README.md`'s
 "Local dev limitation" note — it needs a real `AzureWebJobsStorage`, which

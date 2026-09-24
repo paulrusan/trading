@@ -1,4 +1,4 @@
-import { computeCCI, computeEMA, computeMACD, computeRSI, computeStochastic } from './lib/indicators.js'
+import { computeCCI, computeEMA, computeMACD, computeRSI, computeStochastic, toHeikinAshi } from './lib/indicators.js'
 
 function lastTwoAligned(candles, points) {
   if (points.length < 2) return null
@@ -17,7 +17,28 @@ function isAbove(direction, value, level) {
 // Evaluates whether one condition is currently satisfied at the previous and
 // current candle. Not edge-triggered itself — combining multiple conditions
 // and edge-triggering the combined result happens in evaluateAlert below.
+// `candles` here is already resolved to the right interval for this condition
+// (see evaluateAlert's candlesByInterval lookup).
 function evaluateCondition(condition, candles) {
+  if (condition.type === 'haColor') {
+    const ha = toHeikinAshi(candles)
+    if (ha.length < 2) return null
+    const colorOf = (c) => (c.close >= c.open ? 'green' : 'red')
+    const prev = colorOf(ha[ha.length - 2])
+    const curr = colorOf(ha[ha.length - 1])
+    // A plain state check ("is the candle this color"), not a "just flipped" check —
+    // relying on evaluateAlert's own edge-trigger (combined state going from not-met to
+    // met) to produce "first green after red" naturally: once this condition and every
+    // other one in the alert are all true for the first time, that's the fire. If the
+    // color stays the same color for several bars in a row, this stays "met" the whole
+    // time but doesn't re-trigger, since the edge only fires once per transition.
+    return {
+      prevMet: prev === condition.haColor,
+      currMet: curr === condition.haColor,
+      label: `Heikin Ashi ${condition.haColor} (now ${curr})`,
+    }
+  }
+
   if (condition.type === 'price') {
     const prev = candles[candles.length - 2]
     const curr = candles[candles.length - 1]
@@ -87,25 +108,42 @@ function evaluateCondition(condition, candles) {
   return null
 }
 
-// An alert has one or more conditions (all evaluated against the same
-// symbol/interval's candles) combined with matchMode 'all' (AND) or 'any'
-// (OR). The combined result is what gets edge-triggered — it fires once
-// when the combined state transitions from not-met to met, not every check
-// it stays met. Returns null if there isn't enough data yet to evaluate,
-// otherwise { triggered: boolean, candleTime: number, message: string }.
-export function evaluateAlert(alert, candles) {
-  if (candles.length < 2) return null
-
-  const results = alert.conditions.map((c) => evaluateCondition(c, candles))
+// An alert has one or more conditions combined with matchMode 'all' (AND) or
+// 'any' (OR). Each condition can specify its own `interval` (e.g. a daily
+// trend-permission condition alongside an hourly trigger condition in the
+// same alert) — falling back to the alert's own `interval` when not set, so
+// existing single-interval alerts keep working unchanged. `candlesByInterval`
+// is a Map from interval string to that interval's candles (see
+// alertsEngine.js, which fetches every interval any of the alert's
+// conditions needs). The combined result is what gets edge-triggered — it
+// fires once when the combined state transitions from not-met to met, not
+// every check it stays met. Returns null if there isn't enough data yet to
+// evaluate any condition, otherwise { triggered, candleTime, message }.
+export function evaluateAlert(alert, candlesByInterval) {
+  const results = alert.conditions.map((c) => {
+    const candles = candlesByInterval.get(c.interval ?? alert.interval)
+    if (!candles || candles.length < 2) return null
+    return evaluateCondition(c, candles)
+  })
   if (results.some((r) => r === null)) return null
 
   const matchAny = alert.matchMode === 'any'
   const combine = (key) => (matchAny ? results.some((r) => r[key]) : results.every((r) => r[key]))
-  const curr = candles[candles.length - 1]
+
+  // The trigger/dedup timestamp is the alert's own (primary) interval's latest candle —
+  // the fastest-moving interval actually driving when this alert can fire.
+  const triggerCandles = candlesByInterval.get(alert.interval)
+  const curr = triggerCandles[triggerCandles.length - 1]
+
+  const labelFor = (condition, result) => {
+    const interval = condition.interval ?? alert.interval
+    const prefix = interval !== alert.interval ? `${interval} ` : ''
+    return `${prefix}${result.label}`
+  }
 
   return {
     triggered: !combine('prevMet') && combine('currMet'),
     candleTime: curr.time,
-    message: `${alert.symbol}: ${results.map((r) => r.label).join(matchAny ? ' OR ' : ' AND ')}`,
+    message: `${alert.symbol}: ${alert.conditions.map((c, i) => labelFor(c, results[i])).join(matchAny ? ' OR ' : ' AND ')}`,
   }
 }

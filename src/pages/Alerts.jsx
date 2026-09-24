@@ -20,11 +20,11 @@ const INDICATORS = [
   { value: 'ema', label: 'Price crosses EMA', hasLevel: false, defaultPeriod: 20, defaultLevel: null },
 ]
 
-function emptyPriceCondition() {
-  return { type: 'price', priceLevel: '', priceDirection: 'above' }
+function emptyPriceCondition(interval) {
+  return { type: 'price', priceLevel: '', priceDirection: 'above', interval }
 }
 
-function emptyIndicatorCondition() {
+function emptyIndicatorCondition(interval) {
   const def = INDICATORS[0]
   return {
     type: 'indicator',
@@ -32,7 +32,12 @@ function emptyIndicatorCondition() {
     indicatorPeriod: def.defaultPeriod,
     indicatorLevel: def.defaultLevel,
     indicatorDirection: 'above',
+    interval,
   }
+}
+
+function emptyHaColorCondition(interval) {
+  return { type: 'haColor', haColor: 'green', interval }
 }
 
 const EMPTY_FORM = {
@@ -40,22 +45,32 @@ const EMPTY_FORM = {
   dataSource: 'twelvedata',
   interval: '1day',
   matchMode: 'all',
-  conditions: [emptyPriceCondition()],
+  conditions: [emptyPriceCondition('1day')],
 }
 
-function describeCondition(condition) {
-  if (condition.type === 'price') {
-    return `Price crosses ${condition.priceDirection} ${condition.priceLevel}`
-  }
-  const def = INDICATORS.find((i) => i.value === condition.indicatorKey)
-  const label = def?.label ?? condition.indicatorKey
-  if (!def?.hasLevel) return `${label}, ${condition.indicatorDirection}`
-  return `${label}(${condition.indicatorPeriod}) crosses ${condition.indicatorDirection} ${condition.indicatorLevel}`
+// Each condition can run against a different interval than the alert's own (e.g. a daily
+// trend condition alongside an hourly trigger condition in the same alert) — shown only
+// when it actually differs, so a plain single-interval alert's description stays terse.
+function describeCondition(condition, alertInterval) {
+  const base =
+    condition.type === 'haColor'
+      ? `Heikin Ashi ${condition.haColor}`
+      : condition.type === 'price'
+        ? `Price crosses ${condition.priceDirection} ${condition.priceLevel}`
+        : (() => {
+            const def = INDICATORS.find((i) => i.value === condition.indicatorKey)
+            const label = def?.label ?? condition.indicatorKey
+            return !def?.hasLevel
+              ? `${label}, ${condition.indicatorDirection}`
+              : `${label}(${condition.indicatorPeriod}) crosses ${condition.indicatorDirection} ${condition.indicatorLevel}`
+          })()
+  const interval = condition.interval ?? alertInterval
+  return interval !== alertInterval ? `${interval} ${base}` : base
 }
 
 function describeAlert(alert) {
   const joiner = alert.matchMode === 'any' ? ' OR ' : ' AND '
-  return alert.conditions.map(describeCondition).join(joiner)
+  return alert.conditions.map((c) => describeCondition(c, alert.interval)).join(joiner)
 }
 
 function ConditionRow({ condition, onChange, onRemove, canRemove }) {
@@ -73,7 +88,19 @@ function ConditionRow({ condition, onChange, onRemove, canRemove }) {
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-bg p-3">
-      {condition.type === 'price' ? (
+      {condition.type === 'haColor' ? (
+        <>
+          <span className="text-sm text-text-muted">Heikin Ashi candle is</span>
+          <select
+            value={condition.haColor}
+            onChange={(e) => onChange({ ...condition, haColor: e.target.value })}
+            className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          >
+            <option value="green">green</option>
+            <option value="red">red</option>
+          </select>
+        </>
+      ) : condition.type === 'price' ? (
         <>
           <span className="text-sm text-text-muted">Price crosses</span>
           <select
@@ -141,6 +168,21 @@ function ConditionRow({ condition, onChange, onRemove, canRemove }) {
         </>
       )}
 
+      <label className="flex items-center gap-1.5 text-sm text-text-muted">
+        on
+        <select
+          value={condition.interval}
+          onChange={(e) => onChange({ ...condition, interval: e.target.value })}
+          className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-text outline-none focus:border-accent"
+        >
+          {INTERVALS.map((i) => (
+            <option key={i.value} value={i.value}>
+              {i.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
       {canRemove && (
         <button
           type="button"
@@ -191,7 +233,14 @@ export default function Alerts() {
   const addCondition = (type) =>
     setForm((prev) => ({
       ...prev,
-      conditions: [...prev.conditions, type === 'price' ? emptyPriceCondition() : emptyIndicatorCondition()],
+      conditions: [
+        ...prev.conditions,
+        type === 'price'
+          ? emptyPriceCondition(prev.interval)
+          : type === 'haColor'
+            ? emptyHaColorCondition(prev.interval)
+            : emptyIndicatorCondition(prev.interval),
+      ],
     }))
 
   const removeCondition = (index) =>
@@ -209,15 +258,18 @@ export default function Alerts() {
         interval: form.interval,
         matchMode: form.matchMode,
         conditions: form.conditions.map((c) =>
-          c.type === 'price'
-            ? { type: 'price', priceLevel: Number(c.priceLevel), priceDirection: c.priceDirection }
-            : {
-                type: 'indicator',
-                indicatorKey: c.indicatorKey,
-                indicatorPeriod: Number(c.indicatorPeriod) || undefined,
-                indicatorLevel: Number(c.indicatorLevel) || undefined,
-                indicatorDirection: c.indicatorDirection,
-              },
+          c.type === 'haColor'
+            ? { type: 'haColor', haColor: c.haColor, interval: c.interval }
+            : c.type === 'price'
+              ? { type: 'price', priceLevel: Number(c.priceLevel), priceDirection: c.priceDirection, interval: c.interval }
+              : {
+                  type: 'indicator',
+                  indicatorKey: c.indicatorKey,
+                  indicatorPeriod: Number(c.indicatorPeriod) || undefined,
+                  indicatorLevel: Number(c.indicatorLevel) || undefined,
+                  indicatorDirection: c.indicatorDirection,
+                  interval: c.interval,
+                },
         ),
         email: form.email,
         active: true,
@@ -347,6 +399,13 @@ export default function Alerts() {
               className="rounded-md border border-border px-3 py-1.5 text-xs text-text-muted hover:text-text"
             >
               + Indicator condition
+            </button>
+            <button
+              type="button"
+              onClick={() => addCondition('haColor')}
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-muted hover:text-text"
+            >
+              + Heikin Ashi condition
             </button>
 
             {form.conditions.length > 1 && (
