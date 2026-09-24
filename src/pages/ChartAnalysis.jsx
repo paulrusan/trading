@@ -683,7 +683,8 @@ export default function ChartAnalysis() {
           {tvSymbol ? (
             <>
               <p className="mb-2 text-xs text-text-muted">
-                TradingView's own live feed for this symbol, shown for visual reference.
+                TradingView's own live feed for <span className="font-medium text-text">{tvSymbol}</span>,
+                shown for visual reference.
                 {dataSource === 'yahoo' &&
                   ' Yahoo symbols are best-effort mapped to a TradingView symbol, so this may come from a different exchange/contract than the exact data Claude analyzes above.'}
               </p>
