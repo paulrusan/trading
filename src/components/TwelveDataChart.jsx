@@ -60,8 +60,8 @@ export function TwelveDataChart({
       height,
       layout: { background: { color: colors.surface }, textColor: colors.textMuted },
       grid: {
-        vertLines: { color: colors.grid },
-        horzLines: { color: colors.grid },
+        vertLines: { visible: false },
+        horzLines: { visible: false },
       },
       timeScale: {
         borderColor: colors.grid,

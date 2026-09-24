@@ -118,8 +118,45 @@ const DEFAULT_INDICATOR_STATE = Object.fromEntries(
   ]),
 )
 
-function toTradingViewSymbol(symbol) {
-  return symbol ? symbol.replace('/', '') : null
+// Best-effort Yahoo -> TradingView symbol mapping, same spirit as the studies_overrides
+// mapping above: TradingView's free widget always pulls its OWN live feed for whatever
+// symbol it's given, so this can only point it at the same real-world instrument, not
+// literally replay Yahoo's bars — the two will rarely be pixel-identical. Unmapped
+// symbols (unknown futures roots, indices) return null and the compare panel hides.
+const YAHOO_FUTURES_ROOT_TO_TV = {
+  GC: 'COMEX:GC1!',
+  SI: 'COMEX:SI1!',
+  CL: 'NYMEX:CL1!',
+  NG: 'NYMEX:NG1!',
+  HG: 'COMEX:HG1!',
+  ZC: 'CBOT:ZC1!',
+  ZS: 'CBOT:ZS1!',
+  ZW: 'CBOT:ZW1!',
+  ES: 'CME:ES1!',
+  NQ: 'CME:NQ1!',
+  YM: 'CBOT:YM1!',
+}
+const YAHOO_INDEX_TO_TV = {
+  '^GSPC': 'SP:SPX',
+  '^DJI': 'DJ:DJI',
+  '^IXIC': 'NASDAQ:IXIC',
+  '^RUT': 'TVC:RUT',
+  '^VIX': 'TVC:VIX',
+}
+
+function yahooToTradingViewSymbol(symbol) {
+  if (!symbol) return null
+  if (YAHOO_INDEX_TO_TV[symbol]) return YAHOO_INDEX_TO_TV[symbol]
+  if (symbol.startsWith('^')) return null
+  if (symbol.endsWith('=F')) return YAHOO_FUTURES_ROOT_TO_TV[symbol.slice(0, -2)] ?? null
+  if (symbol.endsWith('=X')) return `FX:${symbol.slice(0, -2)}`
+  if (symbol.endsWith('-USD')) return symbol.replace('-', '')
+  return symbol // plain equity/ETF ticker — TradingView's widget resolves bare tickers fine
+}
+
+function toTradingViewSymbol(symbol, dataSource) {
+  if (!symbol) return null
+  return dataSource === 'yahoo' ? yahooToTradingViewSymbol(symbol) : symbol.replace('/', '')
 }
 
 function computeEnabledIndicators(candles, settings) {
@@ -325,6 +362,8 @@ export default function ChartAnalysis() {
     setCandles([])
     setShowCompare(false)
   }
+
+  const tvSymbol = toTradingViewSymbol(activeSymbol, dataSource)
 
   const studies = [
     ...new Set(
@@ -608,75 +647,59 @@ export default function ChartAnalysis() {
           </svg>
         </button>
 
-        {dataSource === 'twelvedata' && (
-          <button
-            type="button"
-            onClick={() => setShowCompare((v) => !v)}
-            disabled={candles.length === 0}
-            className={`rounded border border-border px-2 py-1 text-xs disabled:opacity-50 ${
-              showCompare ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
-            }`}
-          >
-            Compare
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setShowCompare((v) => !v)}
+          disabled={candles.length === 0}
+          className={`rounded border border-border px-2 py-1 text-xs disabled:opacity-50 ${
+            showCompare ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
+          }`}
+        >
+          Compare
+        </button>
 
         {loading && <span className="text-xs text-text-muted">Loading…</span>}
       </div>
 
-      {dataSource === 'twelvedata' ? (
-        <>
-          <div className="mb-6">
-            {activeSymbol ? (
+      <div className="mb-6">
+        {candles.length > 0 ? (
+          <TwelveDataChart
+            candles={candles}
+            candleType={candleType}
+            indicators={enabledIndicators}
+            interval={interval}
+            height={showCompare ? 400 : 560}
+            onIndicatorDoubleClick={handleIndicatorDoubleClick}
+          />
+        ) : (
+          <div className="flex h-[560px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-text-muted">
+            {loading ? 'Loading…' : 'Enter a symbol above and click Load chart.'}
+          </div>
+        )}
+      </div>
+
+      {showCompare && candles.length > 0 && (
+        <div className="mb-6">
+          {tvSymbol ? (
+            <>
+              <p className="mb-2 text-xs text-text-muted">
+                TradingView's own live feed for this symbol, shown for visual reference.
+                {dataSource === 'yahoo' &&
+                  ' Yahoo symbols are best-effort mapped to a TradingView symbol, so this may come from a different exchange/contract than the exact data Claude analyzes above.'}
+              </p>
               <TradingViewWidget
-                symbol={toTradingViewSymbol(activeSymbol)}
+                symbol={tvSymbol}
                 interval={TV_INTERVAL[interval] ?? 'D'}
                 style={TV_STYLE[candleType] ?? 1}
                 studies={studies}
                 studiesOverrides={studiesOverrides}
                 theme={isDark ? 'dark' : 'light'}
-                height={showCompare ? 400 : 560}
-              />
-            ) : (
-              <div className="flex h-[560px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-text-muted">
-                {loading ? 'Loading…' : 'Enter a symbol above and click Load chart.'}
-              </div>
-            )}
-          </div>
-
-          {showCompare && candles.length > 0 && (
-            <div className="mb-6">
-              <p className="mb-2 text-xs text-text-muted">
-                Twelve Data — the source Claude actually analyzes. Compare against the TradingView
-                chart above to check they agree.
-              </p>
-              <TwelveDataChart
-                candles={candles}
-                candleType={candleType}
-                indicators={enabledIndicators}
-                interval={interval}
                 height={400}
-                onIndicatorDoubleClick={handleIndicatorDoubleClick}
               />
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="mb-6">
-          {candles.length > 0 ? (
-            <TwelveDataChart
-              candles={candles}
-              candleType={candleType}
-              indicators={enabledIndicators}
-              interval={interval}
-              height={560}
-              onIndicatorDoubleClick={handleIndicatorDoubleClick}
-            />
+            </>
           ) : (
-            <div className="flex h-[560px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-text-muted">
-              {loading
-                ? 'Loading…'
-                : 'Enter a symbol above and click Load chart. The TradingView view is unavailable for Yahoo symbols, since they use a different symbol format.'}
+            <div className="flex h-[400px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-text-muted">
+              TradingView doesn't have a known symbol mapping for {activeSymbol}.
             </div>
           )}
         </div>

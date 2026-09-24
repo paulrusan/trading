@@ -46,6 +46,10 @@ export function TradingViewWidget({
         locale: 'en',
         studies,
         studies_overrides: studiesOverrides,
+        overrides: {
+          'paneProperties.vertGridProperties.color': 'rgba(0, 0, 0, 0)',
+          'paneProperties.horzGridProperties.color': 'rgba(0, 0, 0, 0)',
+        },
         hide_top_toolbar: true,
         hide_legend: true,
         allow_symbol_change: false,

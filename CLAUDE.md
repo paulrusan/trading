@@ -194,27 +194,48 @@ computed.
 
 ## Chart Analysis (`/chart`)
 
-Two chart surfaces, both driven by one toolbar (symbol search, interval,
-candle style, indicators dropdown):
+Two chart surfaces, both driven by one toolbar (symbol search, data source,
+interval, candle style, indicators dropdown). **Our own chart is always the
+primary view (on top); TradingView is the optional "Compare" panel below
+it** — the reverse of the original layout, changed because our chart is the
+one rendering the exact data Claude analyzes, so it should be what's seen
+by default. Both charts render with gridlines off (`grid.vertLines/
+horzLines.visible: false` in lightweight-charts; `overrides` with
+transparent `paneProperties.vert/horzGridProperties.color` on the
+TradingView widget) for a clean look — axis border lines stay.
 
-- **TradingView widget** (`TradingViewWidget.jsx`) — TradingView's own public
-  embeddable widget (`s3.tradingview.com/tv.js`), used purely for visual
-  viewing/drawing tools. This is a legitimate public embed, not scraping.
-  Its own top toolbar and in-widget symbol/interval change are disabled
-  (`hide_top_toolbar`, `allow_symbol_change: false`) so our toolbar stays the
-  single source of truth — the free widget can't report back to us if the
-  user changed symbol/interval from inside it. Configured indicator periods
-  are pushed in via `studies_overrides` on a best-effort basis (the free
-  widget doesn't officially document these keys, and can't uniquely
-  configure two instances of the same study type).
-- **Twelve Data comparison chart** (`TwelveDataChart.jsx`, `lightweight-charts`)
-  — renders the exact data Claude analyzes, toggled via the "Compare"
-  button. Bars are positioned by sequential index rather than real
-  timestamp so non-trading periods take up no axis space on any timeframe;
-  real dates are recovered for axis labels/tooltips by looking the index
-  back up in the candle array. Double-clicking a line reopens that
-  indicator's settings (only wired up here — the TradingView widget is a
-  cross-origin iframe we can't intercept clicks inside).
+- **Our chart** (`TwelveDataChart.jsx`, `lightweight-charts`, despite the
+  filename it renders whichever source is selected — Twelve Data or Yahoo)
+  — renders the exact data Claude analyzes. Bars are positioned by
+  sequential index rather than real timestamp so non-trading periods take
+  up no axis space on any timeframe; real dates are recovered for axis
+  labels/tooltips by looking the index back up in the candle array.
+  Double-clicking a line reopens that indicator's settings (only wired up
+  here — the TradingView widget is a cross-origin iframe we can't intercept
+  clicks inside).
+- **TradingView widget** (`TradingViewWidget.jsx`), toggled via the
+  "Compare" button — TradingView's own public embeddable widget
+  (`s3.tradingview.com/tv.js`), used purely for visual reference. This is a
+  legitimate public embed, not scraping. Its own top toolbar and in-widget
+  symbol/interval change are disabled (`hide_top_toolbar`,
+  `allow_symbol_change: false`) so our toolbar stays the single source of
+  truth. Configured indicator periods are pushed in via `studies_overrides`
+  on a best-effort basis (the free widget doesn't officially document these
+  keys, and can't uniquely configure two instances of the same study type).
+  **Important constraint: the free widget always pulls TradingView's own
+  live feed for whatever symbol it's given — there is no way to feed it our
+  fetched candles.** For Twelve Data symbols this is usually a close visual
+  match (`toTradingViewSymbol` just strips the `/`, e.g. `XAU/USD` →
+  `XAUUSD`). For Yahoo, symbols use a completely different format
+  (`GC=F`, `^GSPC`, `BTC-USD`, `EURUSD=X`), so `yahooToTradingViewSymbol` in
+  `ChartAnalysis.jsx` best-effort maps common futures roots/indices/forex/
+  crypto suffixes to a TradingView symbol (e.g. `GC=F` → `COMEX:GC1!`);
+  plain equity/ETF tickers pass through unchanged. Unmapped symbols hide the
+  Compare panel with a note rather than showing a wrong or broken chart.
+  Because the feeds are genuinely different providers, the two charts show
+  the same real-world instrument for visual cross-checking, not
+  bar-for-bar identical data — that's a hard limitation of the free widget,
+  not a bug.
 
 Indicators (`src/lib/indicators.js`, pure functions, no side effects): EMA,
 SMA, Bollinger Bands, CCI, RSI, MACD, ATR, Stochastic, and a Heikin Ashi
