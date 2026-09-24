@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { SymbolSearchInput } from '../components/SymbolSearchInput'
 import { useAuth } from '../context/AuthContext'
 import { useApi } from '../hooks/useApi'
 
@@ -18,6 +19,37 @@ const INDICATORS = [
   { value: 'stoch', label: 'Stochastic %K', hasLevel: true, defaultPeriod: 14, defaultLevel: 80 },
   { value: 'macd', label: 'MACD histogram crosses 0', hasLevel: false, defaultPeriod: null, defaultLevel: null },
   { value: 'ema', label: 'Price crosses EMA', hasLevel: false, defaultPeriod: 20, defaultLevel: null },
+]
+
+// One-click starting points for the multi-timeframe rule validated against real data
+// (see CLAUDE.md's "Alerts" section) — daily CCI(9) sign as trend permission, hourly
+// Heikin Ashi color flip as the entry timing trigger, hourly CCI(20) confirming the
+// bounce is real rather than a fake single-candle wobble. Just prefills interval +
+// conditions into the normal, still-fully-editable condition rows below — not a locked
+// mode, so manual tweaks (or building an alert from scratch) work exactly as before.
+const PRESETS = [
+  {
+    key: 'uptrend-pullback',
+    label: 'Uptrend pullback entry',
+    title: 'Daily CCI(9) above 0, 1h Heikin Ashi green, 1h CCI(20) above 0',
+    interval: '1h',
+    conditions: [
+      { type: 'indicator', indicatorKey: 'cci', indicatorPeriod: 9, indicatorDirection: 'above', indicatorLevel: 0, interval: '1day' },
+      { type: 'haColor', haColor: 'green', interval: '1h' },
+      { type: 'indicator', indicatorKey: 'cci', indicatorPeriod: 20, indicatorDirection: 'above', indicatorLevel: 0, interval: '1h' },
+    ],
+  },
+  {
+    key: 'downtrend-pullback',
+    label: 'Downtrend pullback entry',
+    title: 'Daily CCI(9) below 0, 1h Heikin Ashi red, 1h CCI(20) below 0',
+    interval: '1h',
+    conditions: [
+      { type: 'indicator', indicatorKey: 'cci', indicatorPeriod: 9, indicatorDirection: 'below', indicatorLevel: 0, interval: '1day' },
+      { type: 'haColor', haColor: 'red', interval: '1h' },
+      { type: 'indicator', indicatorKey: 'cci', indicatorPeriod: 20, indicatorDirection: 'below', indicatorLevel: 0, interval: '1h' },
+    ],
+  },
 ]
 
 function emptyPriceCondition(interval) {
@@ -247,6 +279,9 @@ export default function Alerts() {
   const removeCondition = (index) =>
     setForm((prev) => ({ ...prev, conditions: prev.conditions.filter((_, i) => i !== index) }))
 
+  const applyPreset = (preset) =>
+    setForm((prev) => ({ ...prev, interval: preset.interval, conditions: preset.conditions }))
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.symbol.trim()) return
@@ -343,16 +378,15 @@ export default function Alerts() {
         <h2 className="mb-3 text-sm font-medium text-text-muted">New alert</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-3">
-            <input
-              type="text"
-              placeholder="Symbol, e.g. XAU/USD"
+            <SymbolSearchInput
+              dataSource={form.dataSource}
               value={form.symbol}
-              onChange={(e) => updateField('symbol', e.target.value)}
-              className="w-40 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none focus:border-accent"
+              onChange={(symbol) => updateField('symbol', symbol)}
+              placeholder="Search symbol, e.g. XAU/USD"
             />
             <select
               value={form.dataSource}
-              onChange={(e) => updateField('dataSource', e.target.value)}
+              onChange={(e) => setForm((prev) => ({ ...prev, dataSource: e.target.value, symbol: '' }))}
               className="rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none focus:border-accent"
             >
               {DATA_SOURCES.map((s) => (
@@ -372,6 +406,21 @@ export default function Alerts() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-text-muted">Presets:</span>
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.key}
+                type="button"
+                onClick={() => applyPreset(preset)}
+                title={preset.title}
+                className="rounded-md border border-border px-3 py-1.5 text-xs text-text-muted hover:text-text"
+              >
+                {preset.label}
+              </button>
+            ))}
           </div>
 
           <div className="flex flex-col gap-2">
