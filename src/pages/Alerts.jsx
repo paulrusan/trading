@@ -69,6 +69,7 @@ function describeCondition(condition, alertInterval) {
 }
 
 function describeAlert(alert) {
+  if (!Array.isArray(alert.conditions)) return '(unrecognized alert format)'
   const joiner = alert.matchMode === 'any' ? ' OR ' : ' AND '
   return alert.conditions.map((c) => describeCondition(c, alert.interval)).join(joiner)
 }
