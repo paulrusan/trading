@@ -41,6 +41,47 @@ read or write another user's data.
   Data does (`XAG/USD`/`XAU/USD`) — it only has futures (`SI=F`/`GC=F`) and
   ETFs (`SLV`/`GLD`), which is one reason Yahoo exists as an option: it's
   useful for instruments not included in a given Twelve Data plan.
+- `GET/POST/DELETE /api/alerts` — CRUD over the `alerts` Cosmos container
+  (partition key `/userId`). Each alert is `{ symbol, dataSource, interval,
+  type: 'price'|'indicator', ...condition fields, email, active,
+  lastTriggeredAt, lastTriggeredCandleTime }` — see `src/evaluateAlert.js`
+  for the exact condition shape per type/indicator.
+- `POST /api/alerts/run` — manually runs the same alert-checking logic the
+  hourly timer runs (see below), for testing without waiting for the clock.
+  Returns a summary: `{ alertsActive, groups, checked, triggered, failed }`.
+
+## Alerts (hourly email checks)
+
+`src/functions/alertsEngine.js` registers an **hourly timer trigger**
+(`app.timer`, schedule `0 0 * * * *`) that: queries every `active` alert
+across all users, groups them by `(symbol, dataSource, interval)` so two
+users watching the same symbol only cost one market-data fetch, evaluates
+each alert's condition (`src/evaluateAlert.js`, using indicator math ported
+to `src/lib/indicators.js` — an exact copy of the frontend's
+`src/lib/indicators.js`, since those functions are pure with no browser
+dependencies), and emails via SendGrid on a **crossing** (edge-triggered:
+fires once when a condition transitions from not-met to met, using the
+last two candles/indicator points — not every hour it stays true). Which
+bar most recently triggered an alert is tracked via
+`lastTriggeredCandleTime` so the same crossing doesn't re-fire every hour
+until a new bar actually arrives.
+
+**Email**: `src/sendEmail.js` calls SendGrid's REST API directly (no SDK
+dependency). Needs two app settings: `SENDGRID_API_KEY` and
+`SENDGRID_FROM_EMAIL` (must be a sender identity verified in SendGrid —
+Settings → Sender Authentication — or SendGrid will reject the send).
+
+**Local dev limitation**: the timer trigger's listener requires a real
+`AzureWebJobsStorage` connection (it tracks its own schedule state in a
+blob container) — with the empty value this project uses locally, `func
+start` logs `Could not create BlobContainerClient for ScheduleMonitor` and
+the timer just never fires locally. Every other function is unaffected;
+use `POST /api/alerts/run` (or the "Check now" button on `/alerts`) to
+exercise the exact same logic on demand instead. In production, Flex
+Consumption already requires a working `AzureWebJobsStorage` for its own
+deployment model, so the timer runs there without extra setup — confirmed
+this app setting is present on `paultrading` via `az functionapp config
+appsettings list`.
 
 ## Local development
 
@@ -54,6 +95,9 @@ read or write another user's data.
      accounts → Generate new private key). Keep the `\n` escapes in the
      private key as-is; the code unescapes them at runtime.
    - `TWELVE_DATA_API_KEY` — from twelvedata.com (free tier)
+   - `SENDGRID_API_KEY` — from app.sendgrid.com (Settings → API Keys)
+   - `SENDGRID_FROM_EMAIL` — a sender email verified in SendGrid (Settings →
+     Sender Authentication); sends fail otherwise
 4. `npm start` (runs `func start`) — API available at `http://localhost:7071/api/...`
 
 Do **not** set `FUNCTIONS_WORKER_RUNTIME` — Flex Consumption manages the
@@ -62,10 +106,12 @@ app setting outright if present.
 
 ## Cosmos DB setup
 
-Database `paultrading` needs four containers, each partitioned on `/userId`:
+Database `paultrading` needs five containers, each partitioned on `/userId`:
 
 - `trades`, `ideas`, `notes` — journal data
 - `settings` — one document per user, doc id = userId, holds `anthropicApiKey`
+- `alerts` — one document per alert (a user can have many); see the Alerts
+  section above for the shape
 
 Create them via the Azure Portal (Data Explorer → New Container) or a
 one-off script using `@azure/cosmos`'s `createIfNotExists` if they don't

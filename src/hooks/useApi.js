@@ -97,6 +97,14 @@ export function useApi() {
     [call],
   )
 
+  const getAlerts = useCallback(() => call('/alerts', { method: 'GET' }), [call])
+  const saveAlert = useCallback(
+    (alert) => call('/alerts', { method: 'POST', body: JSON.stringify(alert) }),
+    [call],
+  )
+  const deleteAlert = useCallback((id) => call(`/alerts/${id}`, { method: 'DELETE' }), [call])
+  const runAlertsCheck = useCallback(() => call('/alerts/run', { method: 'POST' }), [call])
+
   return {
     loading,
     error,
@@ -115,5 +123,9 @@ export function useApi() {
     askAssistant,
     getMarketData,
     searchSymbols,
+    getAlerts,
+    saveAlert,
+    deleteAlert,
+    runAlertsCheck,
   }
 }

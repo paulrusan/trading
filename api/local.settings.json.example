@@ -8,7 +8,9 @@
     "FIREBASE_PROJECT_ID": "",
     "FIREBASE_CLIENT_EMAIL": "",
     "FIREBASE_PRIVATE_KEY": "",
-    "TWELVE_DATA_API_KEY": ""
+    "TWELVE_DATA_API_KEY": "",
+    "SENDGRID_API_KEY": "",
+    "SENDGRID_FROM_EMAIL": ""
   },
   "Host": {
     "CORS": "*"

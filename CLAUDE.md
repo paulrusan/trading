@@ -31,13 +31,19 @@ trading-journal/
 │   ├── src/
 │   │   ├── cosmosClient.js            # lazy-init Cosmos client (see gotcha below)
 │   │   ├── verifyAuth.js              # lazy-init Firebase Admin, verifies Bearer token
-│   │   ├── crudRoutes.js              # generic CRUD factory for trades/ideas/notes
+│   │   ├── crudRoutes.js              # generic CRUD factory for trades/ideas/notes/alerts
+│   │   ├── marketDataFetchers.js      # fetchFromTwelveData/fetchFromYahoo, shared by
+│   │   │                              #   marketData.js (on-demand) and alertsEngine.js (hourly)
+│   │   ├── evaluateAlert.js           # edge-triggered condition evaluation for alerts
+│   │   ├── sendEmail.js               # SendGrid REST call, no SDK
+│   │   ├── lib/indicators.js          # server-side port of src/lib/indicators.js
 │   │   └── functions/
-│   │       ├── trades.js, ideas.js, notes.js   # registerCrudRoutes(...)
+│   │       ├── trades.js, ideas.js, notes.js, alerts.js   # registerCrudRoutes(...)
 │   │       ├── settings.js            # per-user settings (Anthropic key)
 │   │       ├── assistant.js           # POST /api/assistant — Claude, server-side key
 │   │       ├── marketData.js          # GET /api/market-data — Twelve Data or Yahoo, ?source=
-│   │       └── symbolSearch.js        # GET /api/symbol-search — same source toggle
+│   │       ├── symbolSearch.js        # GET /api/symbol-search — same source toggle
+│   │       └── alertsEngine.js        # hourly timer + POST /api/alerts/run (manual test)
 │   ├── local.settings.json(.example)
 │   └── README.md                      # endpoints, local dev, Flex Consumption deploy notes
 ├── src/
@@ -58,7 +64,8 @@ trading-journal/
 │   │   ├── Dashboard.jsx, Trades.jsx, Ideas.jsx, Notes.jsx
 │   │   ├── Settings.jsx               # Anthropic API key management (BYOK)
 │   │   ├── Assistant.jsx              # chat grounded in journal data
-│   │   └── ChartAnalysis.jsx          # chart + indicators + chat grounded in chart data
+│   │   ├── ChartAnalysis.jsx          # chart + indicators + chat grounded in chart data
+│   │   └── Alerts.jsx                 # create/manage price & indicator email alerts
 │   ├── App.jsx
 │   └── index.css
 └── vite.config.js
@@ -121,8 +128,33 @@ trading-journal/
 }
 ```
 
-All four containers (`trades`, `ideas`, `notes`, `settings`) live in Cosmos
-DB database `paultrading`, partitioned on `/userId`.
+### Alert
+```js
+{
+  id: string,
+  userId: string,
+  symbol: string,
+  dataSource: 'twelvedata' | 'yahoo',
+  interval: '1h' | '4h' | '1day' | '1week',
+  type: 'price' | 'indicator',
+  // type === 'price'
+  priceLevel: number,
+  priceDirection: 'above' | 'below',
+  // type === 'indicator'
+  indicatorKey: 'cci' | 'rsi' | 'stoch' | 'macd' | 'ema',
+  indicatorPeriod: number | undefined,   // unused for 'macd' (fixed 12/26/9)
+  indicatorLevel: number | undefined,    // unused for 'macd'/'ema' (zero-cross / price-cross)
+  indicatorDirection: 'above' | 'below',
+  email: string,
+  active: boolean,
+  createdAt: string,
+  lastTriggeredAt: string | null,
+  lastTriggeredCandleTime: number | null,   // dedupes re-firing within the same bar
+}
+```
+
+All five containers (`trades`, `ideas`, `notes`, `settings`, `alerts`) live
+in Cosmos DB database `paultrading`, partitioned on `/userId`.
 
 ## AI Assistant (bring-your-own-key)
 `/settings` and `/assistant` pages, plus the chat panel on `/chart`. Each
@@ -217,22 +249,41 @@ symbol, unlimited — not a fixed list) as the user types, scoped to
 whichever provider is currently selected, instead of requiring that
 provider's exact symbol format.
 
-### Planned: per-user watchlist + hourly snapshot engine
-Today, all indicator computation is **on-demand**: a user opens `/chart`,
-picks a symbol, and everything is computed in that request/response cycle.
-That stays true for any/unlimited instruments — it's not going away.
+## Alerts (`/alerts`)
 
-On top of that, add an **opt-in, per-user watchlist** (nothing tracked by
-default): a new Cosmos container, e.g. `watchlist` (partition key
-`/userId`, one doc per user holding an array of symbols they've chosen to
-track), and a **timer-triggered Azure Function** that runs hourly, iterates
-only over the symbols currently on *any* user's watchlist (dedupe by symbol
-so two users watching XAU/USD only costs one Twelve Data call), computes
-the full indicator set + a signal, and saves the result. This is why the
-watchlist must be opt-in/bounded rather than "every instrument anyone has
-ever typed in" — Twelve Data's free tier is 800 calls/day, 8/min, so hourly
-computation only scales for a deliberately small, user-curated set of
-symbols, never an unbounded one.
+Email alerts, evaluated hourly in the background — the first real piece of
+the "app does the heavy lifting, Claude only analyzes" direction. A user
+creates an alert (any symbol, either data source, either a price level or
+an indicator condition), and `api/src/functions/alertsEngine.js` — an
+**hourly timer trigger** (`app.timer`, `0 0 * * * *`) — checks every active
+alert across all users, grouping by `(symbol, dataSource, interval)` so two
+users watching the same symbol only cost one market-data fetch (this is the
+opt-in-watchlist cost-control idea below, just scoped to "what you've
+actually created an alert for" rather than a separate watchlist concept).
+
+Conditions are **edge-triggered** (crossing detection using the last two
+candles/indicator points, not "is currently true") so an alert fires once
+per crossing instead of every hour a condition happens to still hold —
+tracked via `lastTriggeredCandleTime` on the alert doc. Indicator alerts
+reuse the exact same math as the chart: `api/src/lib/indicators.js` is a
+straight port of `src/lib/indicators.js` (pure functions, no browser
+dependencies, so no logic changed in the port). Email delivery is
+SendGrid's REST API called directly (`api/src/sendEmail.js`, no SDK), app
+settings `SENDGRID_API_KEY` + `SENDGRID_FROM_EMAIL` (the latter must be a
+verified sender identity in SendGrid).
+
+Because a timer trigger is painful to test locally (see `api/README.md`'s
+"Local dev limitation" note — it needs a real `AzureWebJobsStorage`, which
+this project's local dev leaves empty), the exact same check logic is also
+exposed as `POST /api/alerts/run` for on-demand testing, surfaced as a
+"Check now" button on the Alerts page.
+
+### Planned: broader per-symbol snapshot/trend history
+The Alerts engine above evaluates conditions transiently each hour — it
+doesn't persist an ongoing history of indicator values or detect trend
+phases the way this section originally envisioned. That fuller idea is
+still unbuilt and still worth doing on top of the same hourly-timer
+infrastructure Alerts now provides:
 
 Suggested new containers (partition key `/symbol` — shared across users,
 since the underlying market data is the same regardless of who's watching):
