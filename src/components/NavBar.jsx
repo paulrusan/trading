@@ -33,6 +33,9 @@ export function NavBar() {
           <Link to="/chart" className="text-text-muted hover:text-text">
             Chart
           </Link>
+          <Link to="/watchlist" className="text-text-muted hover:text-text">
+            Watchlist
+          </Link>
           <Link to="/alerts" className="text-text-muted hover:text-text">
             Alerts
           </Link>

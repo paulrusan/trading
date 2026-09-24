@@ -51,6 +51,18 @@ read or write another user's data.
 - `POST /api/alerts/run` — manually runs the same alert-checking logic the
   hourly timer runs (see below), for testing without waiting for the clock.
   Returns a summary: `{ alertsActive, groups, checked, triggered, failed }`.
+- `GET/POST/DELETE /api/watchlist` — CRUD over the `watchlist` Cosmos
+  container (partition key `/userId`). Each entry is
+  `{ symbol, dataSource, interval, createdAt }` — opts a symbol into the
+  hourly snapshot engine below. See "Watchlist" below.
+- `POST /api/snapshots/run` — manually runs the same snapshot logic the
+  hourly timer runs, for testing without waiting for the clock. Returns
+  `{ watchedActive, groups, updated, trendsClosed, failed }`.
+- `GET /api/snapshots` / `GET /api/trends`
+  (`?symbol=&dataSource=&interval=&limit=`) — read-only history for a
+  symbol, oldest-first. Unlike the CRUD resources above these aren't scoped
+  by `userId` (the data is shared/system-written), just auth-gated like
+  everything else.
 
 ## Alerts (hourly email checks)
 
@@ -86,6 +98,33 @@ deployment model, so the timer runs there without extra setup — confirmed
 this app setting is present on `paultrading` via `az functionapp config
 appsettings list`.
 
+## Watchlist (hourly snapshot/trend engine)
+
+`src/functions/snapshotsEngine.js` registers a second **hourly timer
+trigger** (`0 5 * * * *` — 5 minutes after Alerts' `0 0 * * * *`, so the two
+engines don't both hit the market-data API at the same instant) that:
+queries every `watchlist` entry across all users, dedupes by
+`(symbol, dataSource, interval)` the same way Alerts dedupes, fetches
+candles once per group, and derives a `signal` (`strong_buy`/`weak_buy`/
+`hold`/`partial_sell`/`strong_sell`) and `trendPhase`
+(`beginning`/`middle`/`end`) from CCI crossing ±100 —
+`src/computeSnapshot.js` is a small state machine, not just a one-shot
+calculation, since telling `weak_buy` (re-entry within an existing uptrend)
+apart from `strong_buy` (a fresh one) requires knowing the *prior* regime,
+which a single hour of indicator values can't tell you. That regime
+(`up`/`down`/`neutral`), a `weakened` flag, and the current trend's start
+time/price are carried forward as extra fields on each `snapshots` document
+specifically so the next hourly run can read them back.
+
+When a regime flips (an uptrend reversing into `strong_sell`, or vice
+versa), the just-completed run is also written to the `trends` container.
+
+Also exposes `POST /api/snapshots/run` for local testing — same reasoning
+as `/api/alerts/run` — and `GET /api/snapshots`/`GET /api/trends` for
+reading the history back (used by the Watchlist page and, when the
+currently-loaded chart symbol has history, folded into the Claude chat
+context as `context.watchlistHistory`).
+
 ## Local development
 
 1. Install [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local).
@@ -109,12 +148,20 @@ app setting outright if present.
 
 ## Cosmos DB setup
 
-Database `paultrading` needs five containers, each partitioned on `/userId`:
+Database `paultrading` needs eight containers:
 
+Partitioned on `/userId`:
 - `trades`, `ideas`, `notes` — journal data
 - `settings` — one document per user, doc id = userId, holds `anthropicApiKey`
 - `alerts` — one document per alert (a user can have many); see the Alerts
   section above for the shape
+- `watchlist` — one document per watched symbol (a user can have many); see
+  the Watchlist section above
+
+Partitioned on `/symbol` instead (shared across users, since the underlying
+market data doesn't depend on who's watching):
+- `snapshots`, `trends` — written only by `snapshotsEngine.js`; see the
+  Watchlist section above for the shape
 
 Create them via the Azure Portal (Data Explorer → New Container) or a
 one-off script using `@azure/cosmos`'s `createIfNotExists` if they don't

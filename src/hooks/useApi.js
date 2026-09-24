@@ -105,6 +105,34 @@ export function useApi() {
   const deleteAlert = useCallback((id) => call(`/alerts/${id}`, { method: 'DELETE' }), [call])
   const runAlertsCheck = useCallback(() => call('/alerts/run', { method: 'POST' }), [call])
 
+  const getWatchlist = useCallback(() => call('/watchlist', { method: 'GET' }), [call])
+  const saveWatchlistEntry = useCallback(
+    (entry) => call('/watchlist', { method: 'POST', body: JSON.stringify(entry) }),
+    [call],
+  )
+  const deleteWatchlistEntry = useCallback(
+    (id) => call(`/watchlist/${id}`, { method: 'DELETE' }),
+    [call],
+  )
+  const runSnapshotsCheck = useCallback(() => call('/snapshots/run', { method: 'POST' }), [call])
+
+  const getSnapshots = useCallback(
+    (symbol, dataSource = 'twelvedata', interval = '1day', limit = 50) =>
+      call(
+        `/snapshots?symbol=${encodeURIComponent(symbol)}&dataSource=${encodeURIComponent(dataSource)}&interval=${encodeURIComponent(interval)}&limit=${limit}`,
+        { method: 'GET' },
+      ),
+    [call],
+  )
+  const getTrends = useCallback(
+    (symbol, dataSource = 'twelvedata', interval = '1day', limit = 20) =>
+      call(
+        `/trends?symbol=${encodeURIComponent(symbol)}&dataSource=${encodeURIComponent(dataSource)}&interval=${encodeURIComponent(interval)}&limit=${limit}`,
+        { method: 'GET' },
+      ),
+    [call],
+  )
+
   return {
     loading,
     error,
@@ -127,5 +155,11 @@ export function useApi() {
     saveAlert,
     deleteAlert,
     runAlertsCheck,
+    getWatchlist,
+    saveWatchlistEntry,
+    deleteWatchlistEntry,
+    runSnapshotsCheck,
+    getSnapshots,
+    getTrends,
   }
 }

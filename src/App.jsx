@@ -13,6 +13,7 @@ import Notes from './pages/Notes'
 import Register from './pages/Register'
 import Settings from './pages/Settings'
 import Trades from './pages/Trades'
+import Watchlist from './pages/Watchlist'
 
 function App() {
   return (
@@ -84,6 +85,14 @@ function App() {
             element={
               <PrivateRoute>
                 <Alerts />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/watchlist"
+            element={
+              <PrivateRoute>
+                <Watchlist />
               </PrivateRoute>
             }
           />

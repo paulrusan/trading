@@ -461,6 +461,20 @@ export default function ChartAnalysis() {
         }
       }
 
+      // Best-effort: only has data if this symbol/source/interval is on the user's
+      // watchlist and has been snapshotted at least once. Claude interprets this
+      // precomputed history rather than recomputing signals itself.
+      let watchlistHistory
+      try {
+        const [{ results: snapshots }, { results: trends }] = await Promise.all([
+          api.getSnapshots(activeSymbol, dataSource, interval, 30),
+          api.getTrends(activeSymbol, dataSource, interval, 10),
+        ])
+        if (snapshots.length > 0 || trends.length > 0) watchlistHistory = { snapshots, trends }
+      } catch {
+        // not watched, or snapshots not available yet — fine, just omit it
+      }
+
       const context = {
         type: 'chart_analysis',
         symbol: activeSymbol,
@@ -470,6 +484,7 @@ export default function ChartAnalysis() {
         latestPrice: candles[candles.length - 1]?.close,
         heikinAshiCandles: heikinAshi.slice(-50),
         indicators: indicatorContext,
+        watchlistHistory,
       }
       const history = messages.slice(-10)
       const { reply } = await api.askAssistant(text, context, history)

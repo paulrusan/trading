@@ -31,19 +31,22 @@ trading-journal/
 │   ├── src/
 │   │   ├── cosmosClient.js            # lazy-init Cosmos client (see gotcha below)
 │   │   ├── verifyAuth.js              # lazy-init Firebase Admin, verifies Bearer token
-│   │   ├── crudRoutes.js              # generic CRUD factory for trades/ideas/notes/alerts
+│   │   ├── crudRoutes.js              # generic CRUD factory for trades/ideas/notes/alerts/watchlist
 │   │   ├── marketDataFetchers.js      # fetchFromTwelveData/fetchFromYahoo, shared by
-│   │   │                              #   marketData.js (on-demand) and alertsEngine.js (hourly)
+│   │   │                              #   marketData.js and both hourly engines below
 │   │   ├── evaluateAlert.js           # edge-triggered condition evaluation for alerts
+│   │   ├── computeSnapshot.js         # CCI-crossing signal/trend-phase state machine
 │   │   ├── sendEmail.js               # Gmail SMTP via nodemailer
 │   │   ├── lib/indicators.js          # server-side port of src/lib/indicators.js
 │   │   └── functions/
-│   │       ├── trades.js, ideas.js, notes.js, alerts.js   # registerCrudRoutes(...)
+│   │       ├── trades.js, ideas.js, notes.js, alerts.js, watchlist.js  # registerCrudRoutes(...)
 │   │       ├── settings.js            # per-user settings (Anthropic key)
 │   │       ├── assistant.js           # POST /api/assistant — Claude, server-side key
 │   │       ├── marketData.js          # GET /api/market-data — Twelve Data or Yahoo, ?source=
 │   │       ├── symbolSearch.js        # GET /api/symbol-search — same source toggle
-│   │       └── alertsEngine.js        # hourly timer + POST /api/alerts/run (manual test)
+│   │       ├── alertsEngine.js        # hourly timer + POST /api/alerts/run (manual test)
+│   │       ├── snapshotsEngine.js     # hourly timer + POST /api/snapshots/run (manual test)
+│   │       └── snapshots.js           # GET /api/snapshots, GET /api/trends (read-only)
 │   ├── local.settings.json(.example)
 │   └── README.md                      # endpoints, local dev, Flex Consumption deploy notes
 ├── src/
@@ -65,7 +68,8 @@ trading-journal/
 │   │   ├── Settings.jsx               # Anthropic API key management (BYOK)
 │   │   ├── Assistant.jsx              # chat grounded in journal data
 │   │   ├── ChartAnalysis.jsx          # chart + indicators + chat grounded in chart data
-│   │   └── Alerts.jsx                 # create/manage price & indicator email alerts
+│   │   ├── Alerts.jsx                 # create/manage price & indicator email alerts
+│   │   └── Watchlist.jsx              # opt-in hourly snapshot list + latest signal per symbol
 │   ├── App.jsx
 │   └── index.css
 └── vite.config.js
@@ -159,6 +163,11 @@ trading-journal/
 }
 ```
 
+### Watchlist entry, Snapshot, Trend
+See "Watchlist and the per-symbol snapshot/trend engine" below — schemas are
+defined there alongside the engine that writes them, since they're tightly
+coupled (unlike Alert, which is pure user input).
+
 Multiple conditions on one alert are evaluated against the same candle set
 (same symbol/dataSource/interval) and combined per `matchMode` *before*
 edge-triggering — each condition's "currently met" state at the previous
@@ -166,8 +175,10 @@ and current candle is computed, the states are AND'd or OR'd together, and
 the alert fires only on the transition from combined-not-met to
 combined-met. See `api/src/evaluateAlert.js`.
 
-All five containers (`trades`, `ideas`, `notes`, `settings`, `alerts`) live
-in Cosmos DB database `paultrading`, partitioned on `/userId`.
+`trades`, `ideas`, `notes`, `settings`, `alerts`, and `watchlist` all live in
+Cosmos DB database `paultrading`, partitioned on `/userId`. `snapshots` and
+`trends` (see "Watchlist" below) live there too but are partitioned on
+`/symbol` instead, since that data is shared across users.
 
 ## AI Assistant (bring-your-own-key)
 `/settings` and `/assistant` pages, plus the chat panel on `/chart`. Each
@@ -319,31 +330,46 @@ this project's local dev leaves empty), the exact same check logic is also
 exposed as `POST /api/alerts/run` for on-demand testing, surfaced as a
 "Check now" button on the Alerts page.
 
-### Planned: broader per-symbol snapshot/trend history
-The Alerts engine above evaluates conditions transiently each hour — it
-doesn't persist an ongoing history of indicator values or detect trend
-phases the way this section originally envisioned. That fuller idea is
-still unbuilt and still worth doing on top of the same hourly-timer
-infrastructure Alerts now provides:
+## Watchlist (`/watchlist`) and the per-symbol snapshot/trend engine
 
-Suggested new containers (partition key `/symbol` — shared across users,
-since the underlying market data is the same regardless of who's watching):
+Unlike Alerts (which evaluates conditions transiently and only acts on a
+crossing), the Watchlist persists an ongoing history: any symbol a user adds
+gets an **hourly snapshot** (price, CCI, EMA 20/50, a derived `signal`, and
+a `trendPhase`) via `api/src/functions/snapshotsEngine.js` — a second timer
+trigger (`0 5 * * * *`, offset 5 minutes from Alerts' `0 0 * * * *` so the
+two engines don't both hit the market-data API in the same instant) that
+also exposes `POST /api/snapshots/run` for local testing, same reasoning as
+Alerts' `/alerts/run`.
+
+**Containers** (partition key `/symbol` — shared across users, since the
+underlying market data is the same regardless of who's watching):
 ```js
 // snapshots
 {
-  id: string,              // `${symbol}_${isoTimestamp}`
+  id: string,               // `${symbol}_${dataSource}_${interval}_${timestamp}`, '/' sanitized to '-'
   symbol: string,
-  timestamp: string,       // ISO, hourly
+  dataSource: 'twelvedata' | 'yahoo',
+  interval: '1h' | '4h' | '1day' | '1week',
+  timestamp: string,        // ISO, hourly
   price: number,
-  indicators: {...},       // whatever's enabled — same shape as ChartAnalysis's indicator context
-  signal: string,           // e.g. 'strong_buy' | 'weak_buy' | 'hold' | 'partial_sell' | 'strong_sell'
+  indicators: { cci: number, ema20: number | null, ema50: number | null },
+  signal: 'strong_buy' | 'weak_buy' | 'hold' | 'partial_sell' | 'strong_sell',
   trendPhase: 'beginning' | 'middle' | 'end',
+  // Internal bookkeeping the engine needs across hourly runs — 'hold' alone can't tell
+  // you whether the underlying trend is up/down/weakened, so this is carried forward
+  // rather than re-derived from the previous doc's `signal` field.
+  regime: 'up' | 'down' | 'neutral',
+  weakened: boolean,
+  trendStartTime: string | null,
+  trendStartPrice: number | null,
 }
 
-// trends — a completed run, written when direction flips
+// trends — a completed run, written when the regime flips
 {
-  id: string,
+  id: string,                // `${symbol}_${dataSource}_${interval}_${startTime}`, '/' sanitized
   symbol: string,
+  dataSource: 'twelvedata' | 'yahoo',
+  interval: '1h' | '4h' | '1day' | '1week',
   direction: 'up' | 'down',
   startTime: string,
   endTime: string,
@@ -351,15 +377,40 @@ since the underlying market data is the same regardless of who's watching):
   endPrice: number,
   movePct: number,
 }
+
+// watchlist — per-user opt-in list of what to snapshot (partition key /userId, unlike the two above)
+{ id: string, userId: string, symbol: string, dataSource: string, interval: string, createdAt: string }
 ```
-Claude's role stays analysis/suggestion only, per the "AI Assistant" section
-above: the assistant reads precomputed snapshots/trends for symbols on the
-user's watchlist and interprets them, it never recomputes the indicator math
-itself. Building this requires porting `src/lib/indicators.js`'s pure
-functions to run server-side in the timer function (they're already pure
-and side-effect-free, so this should be a straight port, not a rewrite) and
-adding a signal/trend-phase matrix, currently unwritten — see "Trading
-Strategy Context" below for the entry/exit rules that matrix should encode.
+
+**Signal/trend-phase matrix** (`api/src/computeSnapshot.js`), the CCI-crossing
+rules from "Trading Strategy Context" below made concrete — approved
+explicitly rather than guessed, since this generates buy/sell-flavored
+output:
+- `strong_buy` — CCI crosses above +100 from a `down` or `neutral` regime (a fresh uptrend). `trendPhase: 'beginning'`.
+- `weak_buy` — CCI re-crosses above +100 while already in an `up` regime (re-entry after a dip, not a new trend). `trendPhase: 'beginning'`.
+- `partial_sell` — CCI crosses back below +100 after being above it, without a full reversal (momentum fading, not over). `trendPhase: 'end'`.
+- `strong_sell` — CCI crosses below -100 (reversal into a new downtrend). `trendPhase: 'beginning'`. Also closes out a prior `up` trend into a `trends` record.
+- `hold` — no crossing this hour. `trendPhase` is `'end'` if still weakened, `'middle'` if regime is established, `'beginning'` if regime is still `'neutral'`.
+
+EMA20/50 are stored on the snapshot as trend-direction context for Claude to
+reference — they don't drive the signal itself. Symmetric down-trend
+management (a `weak_sell`/partial-cover) was deliberately **not** built,
+since the approved strategy only described managing long entries this way;
+add it if the strategy expands to cover that.
+
+Verified against synthetic price data before shipping (strong_buy →
+partial_sell → strong_sell with a correctly-computed closed `trends` record
+all fired as expected on a hand-built wave) and against one live run
+against real XAU/USD data before being wired into the timer.
+
+**Read endpoints**: `GET /api/snapshots` / `GET /api/trends`
+(`?symbol=&dataSource=&interval=&limit=`) are GET-only (system-written data,
+not user CRUD) and feed both the Watchlist page's per-entry latest-signal
+line and — when the currently-loaded chart symbol has watchlist history —
+the Claude chat context in `ChartAnalysis.jsx` as `context.watchlistHistory
+= { snapshots, trends }`. Per `api/src/functions/assistant.js`'s system
+prompt, Claude is told to interpret this precomputed history, not recompute
+its own signal from the raw indicator values.
 
 ## Trading Strategy Context
 - Entry: 100 shares at start of new trend (CCI crosses +100 or -100)
