@@ -52,6 +52,15 @@ const PRESETS = [
   },
 ]
 
+// `Number(x) || undefined` looks right for "blank -> undefined" but is wrong for a
+// legitimate value of 0 (falsy, so it also becomes undefined) — CCI's zero line is
+// exactly that case, which is what broke the CCI(9)/CCI(20) presets.
+function numberOrUndefined(value) {
+  if (value === '' || value === null || value === undefined) return undefined
+  const n = Number(value)
+  return Number.isNaN(n) ? undefined : n
+}
+
 function emptyPriceCondition(interval) {
   return { type: 'price', priceLevel: '', priceDirection: 'above', interval }
 }
@@ -301,8 +310,8 @@ export default function Alerts() {
               : {
                   type: 'indicator',
                   indicatorKey: c.indicatorKey,
-                  indicatorPeriod: Number(c.indicatorPeriod) || undefined,
-                  indicatorLevel: Number(c.indicatorLevel) || undefined,
+                  indicatorPeriod: numberOrUndefined(c.indicatorPeriod),
+                  indicatorLevel: numberOrUndefined(c.indicatorLevel),
                   indicatorDirection: c.indicatorDirection,
                   interval: c.interval,
                 },
