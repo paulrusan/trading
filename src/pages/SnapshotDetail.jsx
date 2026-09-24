@@ -6,6 +6,12 @@ import { computeCCI, computeParabolicSAR, computeSMA } from '../lib/indicators'
 import { describeCondition, POSITION_LABEL, SIGNAL_LABEL, SIGNAL_MARKER, SIGNAL_STYLE } from '../lib/signalLabels'
 
 const OUTPUT_SIZE_BY_INTERVAL = { '1h': 2000, '4h': 2000, '1day': 5000, '1week': 5000 }
+const INTERVALS = [
+  { value: '1h', label: '1 hour' },
+  { value: '4h', label: '4 hour' },
+  { value: '1day', label: 'Daily' },
+  { value: '1week', label: 'Weekly' },
+]
 
 function toUnixSeconds(iso) {
   return Math.floor(new Date(iso).getTime() / 1000)
@@ -22,10 +28,18 @@ function formatHours(hours) {
 
 export default function SnapshotDetail() {
   const api = useApi()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const symbol = searchParams.get('symbol')
   const dataSource = searchParams.get('dataSource') ?? 'twelvedata'
   const interval = searchParams.get('interval') ?? '1day'
+
+  const handleIntervalChange = (value) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('interval', value)
+      return next
+    })
+  }
 
   const [candles, setCandles] = useState([])
   const [snapshots, setSnapshots] = useState([])
@@ -167,11 +181,20 @@ export default function SnapshotDetail() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl font-semibold text-text">{symbol}</h1>
-          <p className="text-xs text-text-muted">
-            {dataSource === 'yahoo' ? 'Yahoo' : 'Twelve Data'} · {interval}
-          </p>
+          <p className="text-xs text-text-muted">{dataSource === 'yahoo' ? 'Yahoo' : 'Twelve Data'}</p>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={interval}
+            onChange={(e) => handleIntervalChange(e.target.value)}
+            className="rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-text outline-none focus:border-accent"
+          >
+            {INTERVALS.map((i) => (
+              <option key={i.value} value={i.value}>
+                {i.label}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={() => handleBackfill(false)}
