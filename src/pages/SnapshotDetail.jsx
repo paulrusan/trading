@@ -35,7 +35,10 @@ export default function SnapshotDetail() {
   const [running, setRunning] = useState(false)
   const [backfilling, setBackfilling] = useState(false)
   const [runStatus, setRunStatus] = useState('')
+  const [visible, setVisible] = useState({ sma: true, sar: true, cci: true, markers: true })
   const autoBackfillTriedRef = useRef(false)
+
+  const toggleVisible = (key) => setVisible((prev) => ({ ...prev, [key]: !prev[key] }))
 
   const loadAll = () => {
     if (!symbol) return
@@ -106,17 +109,18 @@ export default function SnapshotDetail() {
 
   const latest = snapshots[snapshots.length - 1]
 
-  // Chart's own indicators, always CCI(20) + SMA(200) + SAR here since those are exactly
-  // what drives the signal shown below (entry/regime/exit) — not the general
-  // user-configurable dropdown from ChartAnalysis.jsx.
+  // Chart's own indicators — CCI(20)/SMA(200)/SAR, since those are exactly what drives
+  // the signal shown below (entry/regime/exit) — not the general user-configurable
+  // dropdown from ChartAnalysis.jsx. Each one can still be hidden via `visible`, since
+  // all three plus markers on screen at once is a lot to look at together.
   const indicators = useMemo(() => {
     if (candles.length === 0) return {}
     return {
-      cci: { period: 20, points: computeCCI(candles, 20) },
-      sma: { period: 200, points: computeSMA(candles, 200) },
-      sar: { points: computeParabolicSAR(candles) },
+      ...(visible.cci && { cci: { period: 20, points: computeCCI(candles, 20) } }),
+      ...(visible.sma && { sma: { period: 200, points: computeSMA(candles, 200) } }),
+      ...(visible.sar && { sar: { points: computeParabolicSAR(candles) } }),
     }
-  }, [candles])
+  }, [candles, visible.cci, visible.sma, visible.sar])
 
   // Real candle index for each trade's entry/exit, so duration can be shown in bars
   // (candles) as well as hours — hours alone is misleading once weekend/holiday gaps
@@ -128,16 +132,17 @@ export default function SnapshotDetail() {
     return fromIdx !== undefined && toIdx !== undefined ? toIdx - fromIdx : null
   }
 
-  // One marker per signal event (every CCI zero-line crossing) — buy/short as arrows
-  // into the bar, exit_long/exit_short as an "X" on the opposite side.
+  // One marker per signal event (every entry/exit) — buy/short as arrows into the bar,
+  // exit_long/exit_short as an "X" on the opposite side. Hidden entirely via `visible`.
   const markers = useMemo(() => {
+    if (!visible.markers) return []
     return snapshots
       .filter((s) => s.signal !== 'hold' && SIGNAL_MARKER[s.signal])
       .map((s) => ({
         time: toUnixSeconds(s.timestamp),
         ...SIGNAL_MARKER[s.signal],
       }))
-  }, [snapshots])
+  }, [snapshots, visible.markers])
 
   const recentTrades = trends.slice(-10).reverse()
   const avgTradeHours =
@@ -199,6 +204,30 @@ export default function SnapshotDetail() {
       {runStatus && <p className="mb-3 text-xs text-text-muted">{runStatus}</p>}
       {error && <p className="mb-3 text-sm text-loss">{error}</p>}
       {loading && <p className="mb-3 text-sm text-text-muted">Loading…</p>}
+
+      {candles.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-3">
+          {[
+            { key: 'sma', label: 'SMA(200)' },
+            { key: 'sar', label: 'SAR' },
+            { key: 'cci', label: 'CCI(20)' },
+            { key: 'markers', label: 'Markers' },
+          ].map(({ key, label }) => (
+            <label
+              key={key}
+              className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted hover:text-text"
+            >
+              <input
+                type="checkbox"
+                checked={visible[key]}
+                onChange={() => toggleVisible(key)}
+                className="accent-accent"
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      )}
 
       {candles.length > 0 && (
         <div className="mb-6">
