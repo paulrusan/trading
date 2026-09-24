@@ -169,6 +169,7 @@ trading-journal/
   createdAt: string,
   lastTriggeredAt: string | null,
   lastTriggeredCandleTime: number | null,   // dedupes re-firing within the same bar
+  triggerHistory: [{ candleTime: number, triggeredAt: string }],  // last 10 firings — the /alert-chart "View chart" view
 }
 ```
 
