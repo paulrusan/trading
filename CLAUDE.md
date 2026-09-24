@@ -337,12 +337,15 @@ exposed as `POST /api/alerts/run` for on-demand testing, surfaced as a
 
 Unlike Alerts (which evaluates conditions transiently and only acts on a
 crossing), the Watchlist persists an ongoing history: any symbol a user adds
-gets an **hourly snapshot** (price, CCI, EMA 20/50, a derived `signal`, and
-a `trendPhase`) via `api/src/functions/snapshotsEngine.js` — a second timer
-trigger (`0 5 * * * *`, offset 5 minutes from Alerts' `0 0 * * * *` so the
-two engines don't both hit the market-data API in the same instant) that
-also exposes `POST /api/snapshots/run` for local testing, same reasoning as
-Alerts' `/alerts/run`.
+gets an **hourly snapshot** (price, CCI(20), SMA(200), a derived `signal`,
+and a `trendPhase`) via `api/src/functions/snapshotsEngine.js` — a second
+timer trigger (`0 5 * * * *`, offset 5 minutes from Alerts' `0 0 * * * *` so
+the two engines don't both hit the market-data API in the same instant)
+that also exposes `POST /api/snapshots/run` for local testing, same
+reasoning as Alerts' `/alerts/run`. Both the live check and backfill (below)
+fetch Twelve Data's documented max (`FETCH_OUTPUT_SIZE = 5000`) — the
+SMA(200) needs that much headroom to warm up; fetching less risks it never
+warming up at all, silently preventing any signal from ever confirming.
 
 **Containers** (partition key `/symbol` — shared across users, since the
 underlying market data is the same regardless of who's watching):
@@ -355,14 +358,13 @@ underlying market data is the same regardless of who's watching):
   interval: '1h' | '4h' | '1day' | '1week',
   timestamp: string,        // ISO, hourly
   price: number,
-  indicators: { cci: number, ema20: number | null, ema50: number | null },
-  signal: 'strong_buy' | 'weak_buy' | 'hold' | 'partial_sell' | 'strong_sell',
-  trendPhase: 'beginning' | 'middle' | 'end',
+  indicators: { cci: number, sma200: number | null },
+  signal: 'strong_buy' | 'hold' | 'strong_sell',
+  trendPhase: 'beginning' | 'middle',
   // Internal bookkeeping the engine needs across hourly runs — 'hold' alone can't tell
-  // you whether the underlying trend is up/down/weakened, so this is carried forward
-  // rather than re-derived from the previous doc's `signal` field.
+  // you whether the underlying trend is up/down, so this is carried forward rather than
+  // re-derived from the previous doc's `signal` field.
   regime: 'up' | 'down' | 'neutral',
-  weakened: boolean,
   trendStartTime: string | null,
   trendStartPrice: number | null,
 }
@@ -385,26 +387,27 @@ underlying market data is the same regardless of who's watching):
 { id: string, userId: string, symbol: string, dataSource: string, interval: string, createdAt: string }
 ```
 
-**Signal/trend-phase matrix** (`api/src/computeSnapshot.js`), the CCI-crossing
-rules from "Trading Strategy Context" below made concrete — approved
-explicitly rather than guessed, since this generates buy/sell-flavored
-output:
-- `strong_buy` — CCI crosses above +100 from a `down` or `neutral` regime (a fresh uptrend). `trendPhase: 'beginning'`.
-- `weak_buy` — CCI re-crosses above +100 while already in an `up` regime (re-entry after a dip, not a new trend). `trendPhase: 'beginning'`.
-- `partial_sell` — CCI crosses back below +100 after being above it, without a full reversal (momentum fading, not over). `trendPhase: 'end'`.
-- `strong_sell` — CCI crosses below -100 (reversal into a new downtrend). `trendPhase: 'beginning'`. Also closes out a prior `up` trend into a `trends` record.
-- `hold` — no crossing this hour. `trendPhase` is `'end'` if still weakened, `'middle'` if regime is established, `'beginning'` if regime is still `'neutral'`.
+**Signal rule** (`api/src/computeSnapshot.js`) — **recalibrated from the
+original CCI(14)/±100 rule below in "Trading Strategy Context" after
+empirical testing showed that rule (and naive alternatives) didn't hold
+up**:
+- `strong_buy` — CCI(20) crosses above 0 **and** price is above the SMA(200) at that bar. Closes a prior `down` trend if one was open. `trendPhase: 'beginning'`.
+- `strong_sell` — CCI(20) crosses below 0 **and** price is below the SMA(200). Closes a prior `up` trend. `trendPhase: 'beginning'`.
+- `hold` — no crossing, or a crossing that didn't agree with the SMA(200) (rejected as noise, regime unchanged). `trendPhase: 'middle'` once a regime is established, `'beginning'` while still `'neutral'`.
 
-EMA20/50 are stored on the snapshot as trend-direction context for Claude to
-reference — they don't drive the signal itself. Symmetric down-trend
-management (a `weak_sell`/partial-cover) was deliberately **not** built,
-since the approved strategy only described managing long entries this way;
-add it if the strategy expands to cover that.
+No `weak_buy`/`partial_sell` here (unlike the old ±100 rule, which used the
+extreme band to distinguish a fresh trend from a re-entry, and a fading-
+but-not-reversed state) — with a two-state up/down regime there's no
+natural middle state; a rejected crossing is just noise, not a distinct
+signal.
 
-Verified against synthetic price data before shipping (strong_buy →
-partial_sell → strong_sell with a correctly-computed closed `trends` record
-all fired as expected on a hand-built wave) and against one live run
-against real XAU/USD data before being wired into the timer.
+**Why this rule, not something simpler** — measured against ~149 days of
+real USD/CAD 1h data before choosing it (reproducible with
+`computeCCI`/`computeSMA` directly against `fetchFromTwelveData` output,
+same as the checks that produced these numbers):
+- CCI(14)/±100 (the original rule): 163 trend-flips.
+- CCI(20) crossing zero, unfiltered: 326 flips — **noisier than ±100, not calmer**, because 0 sits in the middle of the oscillator's range and price barely has to move to cross it; a longer period alone doesn't fix this (CCI(200) zero-crossing was still 45 flips, comparable to CCI(55)/±100's 42).
+- **CCI(20) crossing zero, confirmed only when price agrees with SMA(200): 19 flips.** Spot-checked against the real chart — each of the 19 held up as a real trend segment, including one that ran the entire June-to-July period. This is the rule that shipped.
 
 **Read endpoints**: `GET /api/snapshots` / `GET /api/trends`
 (`?symbol=&dataSource=&interval=&limit=`) are GET-only (system-written data,
@@ -420,37 +423,41 @@ a symbol was first watched — on its own it has no memory of anything
 earlier, even though the candle history needed to reconstruct past trends
 is already available. `POST /api/snapshots/backfill`
 (`api/src/functions/snapshotsEngine.js`'s `runBackfill`) fixes that:
-`computeSnapshot.js` was refactored so both the live hourly step
-(`computeSnapshotUpdate`) and a new bulk replay (`backfillTrendHistory`)
-share one `stepSignal` core, and the bulk version runs that exact same
-logic across the whole candle history in one pass — verified to produce
-identical results to running the live step incrementally bar-by-bar
-before shipping. `/snapshot` (`SnapshotDetail.jsx`) triggers this
-automatically the first time it loads a symbol with no trend history yet,
-plus a manual "Backfill history" button. It only writes bars where
-something happened (a non-`hold` signal) plus the current bar, not every
-historical hourly bar. **Empirically, on live USD/CAD 1h data this found
-241 events / 58 completed trends across ~1424 candles (~59 days)** — CCI
-±100 crossings are fairly frequent on an hourly timeframe, so "trend" here
-means any CCI-confirmed swing, not necessarily what looks like a single
-major move on the chart. Worth keeping in mind if trend counts look noisy
-on shorter intervals.
+`computeSnapshot.js` is structured so both the live hourly step
+(`computeSnapshotUpdate`) and a bulk replay (`backfillTrendHistory`) share
+one `stepSignal` core, and the bulk version runs that exact same logic
+across the whole candle history in one pass — verified to produce
+identical results to running the live step incrementally bar-by-bar, and
+re-verified again after the CCI(20)/SMA(200) rewrite. Only writes bars
+where something happened (a non-`hold` signal) plus the current bar, not
+every historical hourly bar. `/snapshot` (`SnapshotDetail.jsx`) triggers
+this automatically the first time it loads a symbol with no trend history
+yet, plus a manual "Backfill history" button.
 
 **Snapshot detail page** (`/snapshot?symbol=&dataSource=&interval=`,
 `SnapshotDetail.jsx`): opens in a new tab from a "View" link on each
-Watchlist row. Shows the price chart with markers at every trend's start
-(closed ones from `trends`, plus the current still-open one from the
-latest snapshot's `trendStartTime`, added via a `markers` prop on
+Watchlist row. Shows the price chart (with SMA(200) overlaid — the only
+overlay shown, so the chart's own price badge on the right edge stays
+singular rather than stacking one per indicator) with markers at every
+trend's start (closed ones from `trends`, plus the current still-open one
+from the latest snapshot's `trendStartTime`, added via a `markers` prop on
 `TwelveDataChart.jsx` — `createSeriesMarkers` from `lightweight-charts`,
 mapped through the same real-time -> index lookup as everything else in
-that component), current condition (signal/regime/phase, CCI, EMA 20/50,
-how long the trend's been running, % move since it started), an estimated
-remaining duration (average of the last 3 completed trends vs. elapsed —
-explicitly framed as a rough average of past behavior, not a prediction),
-and a table of the previous 3 trends. `src/lib/signalLabels.js` holds the
-shared signal/phase vocabulary (`SIGNAL_LABEL`, `SIGNAL_STYLE`,
+that component), current condition (signal/regime/phase, CCI(20),
+SMA(200), how long the trend's been running, % move since it started), an
+estimated remaining duration (average of the last 3 completed trends vs.
+elapsed — explicitly framed as a rough average of past behavior, not a
+prediction), and a table of the previous 3 trends. `src/lib/signalLabels.js`
+holds the shared signal/phase vocabulary (`SIGNAL_LABEL`, `SIGNAL_STYLE`,
 `PHASE_LABEL`, `describeCondition`) so this page and the Watchlist list
 view stay consistent.
+
+Every price-pane overlay series in `TwelveDataChart.jsx` (EMA, SMA,
+Bollinger Bands, SAR) sets `lastValueVisible: false, priceLineVisible:
+false` — without this, each enabled overlay stacked its own price badge on
+the right edge alongside the candle series' own, which looked like 2-3
+duplicate prices once more than one overlay was on screen at once (most
+visible on this page, which always shows one).
 
 ## Trading Strategy Context
 - Entry: 100 shares at start of new trend (CCI crosses +100 or -100)
@@ -459,6 +466,12 @@ view stay consistent.
 - Indicators referenced by the strategy: CCI (14), EMA 20/50, Parabolic SAR,
   Heikin Ashi candles — all implemented in `indicators.js` (see "Chart
   Analysis" above)
+
+**Note:** this is the original strategy spec, kept here for context. The
+Watchlist engine's actual signal rule has since been recalibrated from it
+based on empirical testing against real data — see "Watchlist" above for
+the rule that's actually implemented (CCI(20) crossing zero, confirmed by
+SMA(200) agreement) and the numbers that led there.
 
 ## Phase 1 — Scaffold & Deploy
 1. Run in terminal (outside Claude Code):

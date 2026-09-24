@@ -1,39 +1,45 @@
-import { computeCCI, computeEMA } from './lib/indicators.js'
+import { computeCCI, computeSMA } from './lib/indicators.js'
 
-const CCI_PERIOD = 14
-const CCI_LEVEL = 100
+const CCI_PERIOD = 20
+const MA_PERIOD = 200
 
 function lastTwo(points) {
   if (points.length < 2) return null
   return { prev: points[points.length - 2], curr: points[points.length - 1] }
 }
 
-// Derives one step's signal/trendPhase from a CCI value transition, per the approved
-// rules: strong_buy = CCI crosses above +100 from a 'down' or 'neutral' regime (new
-// uptrend). weak_buy = CCI re-crosses above +100 while already in an 'up' regime
-// (re-entry after a dip, not a fresh trend). partial_sell = CCI crosses back below +100
-// after being above it, without a full reversal (momentum fading, not over). strong_sell
-// = CCI crosses below -100 (reversal into a new downtrend, or the first down-trend).
-// Anything else is 'hold'.
+// Trend rule, tuned against real data rather than guessed: CCI(20) crossing the zero
+// line marks a trend flip, but only counts when price agrees with the 200-period SMA's
+// side (price above it for an up-flip, below it for a down-flip) — the SMA(200) filters
+// out counter-trend noise from the zero-line crossing, which alone is far noisier than
+// it looks (see CLAUDE.md's "Watchlist" section for the comparison numbers). Verified
+// against ~149 days of real USD/CAD 1h data before shipping: raw CCI(20) zero-crossing
+// alone gave 326 flips; adding the SMA(200) filter cut that to 19, and each of those 19
+// checked out as a real, sensible trend segment (including one that ran the entire
+// June-July period) rather than noise.
 //
-// Needs the PRIOR regime/weakened state, not just the prior "signal" — 'hold' alone is
-// ambiguous (it can mean "holding an established uptrend" or "holding a weakened one
-// still waiting to reverse"). Pure and side-effect-free so both the live hourly step
-// (computeSnapshotUpdate) and the bulk historical replay (backfillTrendHistory) below
-// use the exact same logic instead of two implementations that could drift apart.
-function stepSignal({ prevCci, currCci, price, timestamp, prevState }) {
-  let { regime, weakened, trendStartTime, trendStartPrice } = prevState
+// This replaces the old CCI(14)/+-100 rule, which had its own weak_buy/partial_sell
+// distinction for re-entries and fading momentum near the +-100 extreme. There's no
+// natural equivalent of that here — a rejected crossing is just noise, not a distinct
+// state — so the signal set is simpler: strong_buy / strong_sell / hold.
+function stepSignal({ prevCci, currCci, price, sma200, timestamp, prevState }) {
+  const { regime, trendStartTime, trendStartPrice } = prevState
 
-  const crossedUp = prevCci <= CCI_LEVEL && currCci > CCI_LEVEL
-  const crossedDown = prevCci >= -CCI_LEVEL && currCci < -CCI_LEVEL
-  const weakenedNow = regime === 'up' && !weakened && prevCci > CCI_LEVEL && currCci <= CCI_LEVEL
+  const crossedUp = prevCci <= 0 && currCci > 0
+  const crossedDown = prevCci >= 0 && currCci < 0
+  // No SMA(200) yet (still warming up) — don't filter, but don't confirm either; treat
+  // as if the crossing didn't happen rather than accepting it unfiltered.
+  const agreesUp = sma200 != null && price > sma200
+  const agreesDown = sma200 != null && price < sma200
 
-  let signal
-  let trendPhase
+  let signal = 'hold'
+  let trendPhase = regime === 'neutral' ? 'beginning' : 'middle'
+  let nextRegime = regime
+  let nextTrendStartTime = trendStartTime
+  let nextTrendStartPrice = trendStartPrice
   let closedTrend = null
 
-  if (crossedUp) {
-    signal = regime === 'up' ? 'weak_buy' : 'strong_buy'
+  if (crossedUp && agreesUp && regime !== 'up') {
     if (regime === 'down' && trendStartTime) {
       closedTrend = {
         direction: 'down',
@@ -44,14 +50,12 @@ function stepSignal({ prevCci, currCci, price, timestamp, prevState }) {
         movePct: ((price - trendStartPrice) / trendStartPrice) * 100,
       }
     }
-    if (regime !== 'up') {
-      trendStartTime = timestamp
-      trendStartPrice = price
-    }
-    regime = 'up'
-    weakened = false
+    signal = 'strong_buy'
     trendPhase = 'beginning'
-  } else if (crossedDown) {
+    nextRegime = 'up'
+    nextTrendStartTime = timestamp
+    nextTrendStartPrice = price
+  } else if (crossedDown && agreesDown && regime !== 'down') {
     if (regime === 'up' && trendStartTime) {
       closedTrend = {
         direction: 'up',
@@ -63,26 +67,25 @@ function stepSignal({ prevCci, currCci, price, timestamp, prevState }) {
       }
     }
     signal = 'strong_sell'
-    regime = 'down'
-    weakened = false
-    trendStartTime = timestamp
-    trendStartPrice = price
     trendPhase = 'beginning'
-  } else if (weakenedNow) {
-    signal = 'partial_sell'
-    weakened = true
-    trendPhase = 'end'
-  } else {
-    signal = 'hold'
-    trendPhase = weakened ? 'end' : regime === 'neutral' ? 'beginning' : 'middle'
+    nextRegime = 'down'
+    nextTrendStartTime = timestamp
+    nextTrendStartPrice = price
   }
 
-  return { signal, trendPhase, regime, weakened, trendStartTime, trendStartPrice, closedTrend }
+  return {
+    signal,
+    trendPhase,
+    regime: nextRegime,
+    trendStartTime: nextTrendStartTime,
+    trendStartPrice: nextTrendStartPrice,
+    closedTrend,
+  }
 }
 
-// Regime/weakened/trendStartTime/trendStartPrice are carried forward on the snapshot
-// doc itself as bookkeeping fields (not just the fields originally sketched in
-// CLAUDE.md's "Planned" note) so the next hourly run can read them back.
+// regime/trendStartTime/trendStartPrice are carried forward on the snapshot doc itself
+// as bookkeeping fields so the next hourly run can read them back — a rejected (noise)
+// crossing needs to know the CURRENT confirmed regime, not just the last signal.
 export function computeSnapshotUpdate(candles, prevSnapshot) {
   const cci = computeCCI(candles, CCI_PERIOD)
   const aligned = lastTwo(cci)
@@ -92,30 +95,31 @@ export function computeSnapshotUpdate(candles, prevSnapshot) {
   const time = candles[candles.length - 1].time
   const nowIso = new Date(time * 1000).toISOString()
 
+  const sma200 = computeSMA(candles, MA_PERIOD)
+  const sma200Now = sma200[sma200.length - 1]?.value ?? null
+
   const prevState = {
     regime: prevSnapshot?.regime ?? 'neutral',
-    weakened: prevSnapshot?.weakened ?? false,
     trendStartTime: prevSnapshot?.trendStartTime ?? null,
     trendStartPrice: prevSnapshot?.trendStartPrice ?? null,
   }
-  const step = stepSignal({ prevCci: aligned.prev.value, currCci: aligned.curr.value, price, timestamp: nowIso, prevState })
-
-  const ema20 = computeEMA(candles, 20)
-  const ema50 = computeEMA(candles, 50)
+  const step = stepSignal({
+    prevCci: aligned.prev.value,
+    currCci: aligned.curr.value,
+    price,
+    sma200: sma200Now,
+    timestamp: nowIso,
+    prevState,
+  })
 
   return {
     snapshot: {
       timestamp: nowIso,
       price,
-      indicators: {
-        cci: aligned.curr.value,
-        ema20: ema20[ema20.length - 1]?.value ?? null,
-        ema50: ema50[ema50.length - 1]?.value ?? null,
-      },
+      indicators: { cci: aligned.curr.value, sma200: sma200Now },
       signal: step.signal,
       trendPhase: step.trendPhase,
       regime: step.regime,
-      weakened: step.weakened,
       trendStartTime: step.trendStartTime,
       trendStartPrice: step.trendStartPrice,
     },
@@ -125,9 +129,9 @@ export function computeSnapshotUpdate(candles, prevSnapshot) {
 
 // One-time (or re-run on demand) reconstruction of signal/trend history from candles
 // already on hand, rather than only ever accumulating forward from whenever a symbol was
-// added to the watchlist. Replays the exact same stepSignal logic bar-by-bar across the
-// whole CCI series, so the result is identical to what the live hourly engine would have
-// produced had it been running the entire time.
+// added to the watchlist. Replays the exact same stepSignal logic bar-by-bar, so the
+// result is identical to what the live hourly engine would have produced had it been
+// running the entire time.
 //
 // Returns every bar where something happened (a non-'hold' signal) plus the final bar
 // (the current state) — not every single 'hold' bar, which for a few thousand hourly
@@ -138,12 +142,10 @@ export function backfillTrendHistory(candles) {
   if (cci.length < 2) return { events: [], trends: [] }
 
   const timeToCandle = new Map(candles.map((c) => [c.time, c]))
-  const ema20 = computeEMA(candles, 20)
-  const ema50 = computeEMA(candles, 50)
-  const timeToEma20 = new Map(ema20.map((p) => [p.time, p.value]))
-  const timeToEma50 = new Map(ema50.map((p) => [p.time, p.value]))
+  const sma200 = computeSMA(candles, MA_PERIOD)
+  const timeToSma200 = new Map(sma200.map((p) => [p.time, p.value]))
 
-  let state = { regime: 'neutral', weakened: false, trendStartTime: null, trendStartPrice: null }
+  let state = { regime: 'neutral', trendStartTime: null, trendStartPrice: null }
   const events = []
   const trends = []
 
@@ -151,17 +153,18 @@ export function backfillTrendHistory(candles) {
     const candle = timeToCandle.get(cci[i].time)
     if (!candle) continue
     const timestamp = new Date(candle.time * 1000).toISOString()
+    const sma200Now = timeToSma200.get(candle.time) ?? null
 
     const step = stepSignal({
       prevCci: cci[i - 1].value,
       currCci: cci[i].value,
       price: candle.close,
+      sma200: sma200Now,
       timestamp,
       prevState: state,
     })
     state = {
       regime: step.regime,
-      weakened: step.weakened,
       trendStartTime: step.trendStartTime,
       trendStartPrice: step.trendStartPrice,
     }
@@ -172,11 +175,10 @@ export function backfillTrendHistory(candles) {
       events.push({
         timestamp,
         price: candle.close,
-        indicators: { cci: cci[i].value, ema20: timeToEma20.get(candle.time) ?? null, ema50: timeToEma50.get(candle.time) ?? null },
+        indicators: { cci: cci[i].value, sma200: sma200Now },
         signal: step.signal,
         trendPhase: step.trendPhase,
         regime: step.regime,
-        weakened: step.weakened,
         trendStartTime: step.trendStartTime,
         trendStartPrice: step.trendStartPrice,
       })

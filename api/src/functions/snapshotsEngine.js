@@ -4,8 +4,12 @@ import { getContainer } from '../cosmosClient.js'
 import { fetchCandles } from '../marketDataFetchers.js'
 import { verifyAuth } from '../verifyAuth.js'
 
-const OUTPUT_SIZE_BY_INTERVAL = { '1h': 300, '4h': 300, '1day': 300, '1week': 300 }
-const BACKFILL_OUTPUT_SIZE = { '1h': 2000, '4h': 2000, '1day': 5000, '1week': 5000 }
+// The signal rule needs a 200-period SMA warmed up (plus CCI's own period on top), so
+// both the live hourly check and the backfill fetch Twelve Data's documented max —
+// fetching fewer risks the SMA(200) never actually warming up, which would silently
+// mean no signal can ever fire (every crossing gets treated as "not enough data yet"
+// rather than rejected/confirmed against the filter).
+const FETCH_OUTPUT_SIZE = 5000
 
 // Cosmos doc ids can't contain '/', which real symbols do (e.g. "XAU/USD").
 function idPrefix(symbol, dataSource, interval) {
@@ -48,7 +52,7 @@ export async function runSnapshotsCheck(log = () => {}) {
 
   for (const [key, { symbol, dataSource, interval }] of groups) {
     try {
-      const candles = await fetchCandles(symbol, interval, OUTPUT_SIZE_BY_INTERVAL[interval] ?? 300, dataSource)
+      const candles = await fetchCandles(symbol, interval, FETCH_OUTPUT_SIZE, dataSource)
       const prevSnapshot = await getLatestSnapshot(symbol, dataSource, interval)
       const result = computeSnapshotUpdate(candles, prevSnapshot)
       if (!result) {
@@ -95,7 +99,7 @@ export async function runSnapshotsCheck(log = () => {}) {
 // the final/current bar — not every single 'hold' bar, which for a few thousand hourly
 // candles would mean a few thousand near-identical Cosmos writes for one on-demand call.
 export async function runBackfill(symbol, dataSource, interval, log = () => {}) {
-  const candles = await fetchCandles(symbol, interval, BACKFILL_OUTPUT_SIZE[interval] ?? 2000, dataSource)
+  const candles = await fetchCandles(symbol, interval, FETCH_OUTPUT_SIZE, dataSource)
   const { events, trends } = backfillTrendHistory(candles)
   const prefix = idPrefix(symbol, dataSource, interval)
 

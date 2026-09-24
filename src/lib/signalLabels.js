@@ -1,26 +1,25 @@
 // Shared between Watchlist.jsx (list view) and SnapshotDetail.jsx (single-symbol view)
 // so the signal/phase vocabulary stays in exactly one place.
+//
+// Just three real signals — the CCI(20)/SMA(200) rule in api/src/computeSnapshot.js has
+// no equivalent of the old +-100 rule's weak_buy/partial_sell (a rejected crossing is
+// just noise, not a distinct state), so those were removed rather than left unreachable.
 
 export const SIGNAL_LABEL = {
   strong_buy: 'Strong buy',
-  weak_buy: 'Weak buy (re-entry)',
   hold: 'Hold',
-  partial_sell: 'Partial sell',
   strong_sell: 'Strong sell',
 }
 
 export const SIGNAL_STYLE = {
   strong_buy: 'text-profit',
-  weak_buy: 'text-profit',
   hold: 'text-text-muted',
-  partial_sell: 'text-loss',
   strong_sell: 'text-loss',
 }
 
 export const PHASE_LABEL = {
   beginning: 'Beginning',
   middle: 'Middle',
-  end: 'End (weakening)',
 }
 
 export function describeCondition(snapshot) {

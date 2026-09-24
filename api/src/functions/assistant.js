@@ -16,11 +16,12 @@ illustrative, not financial advice, and past performance/indicator behavior does
 future results.
 
 When "watchlistHistory" is present: its "snapshots" are precomputed hourly records (price,
-CCI, EMA 20/50, a "signal" of strong_buy/weak_buy/hold/partial_sell/strong_sell, and a
-"trendPhase" of beginning/middle/end) and its "trends" are completed up/down runs. These are
-already computed server-side from CCI crossing +-100 — interpret and explain them, don't
-recompute your own signal from the raw indicator values, and don't imply more certainty than
-the underlying rule (a CCI crossing) actually supports.
+CCI(20), SMA(200), a "signal" of strong_buy/hold/strong_sell, and a "trendPhase" of
+beginning/middle) and its "trends" are completed up/down runs. These are already computed
+server-side from CCI(20) crossing the zero line, confirmed only when price agrees with the
+200-period SMA (a filter that rejects counter-trend noise) — interpret and explain them,
+don't recompute your own signal from the raw indicator values, and don't imply more
+certainty than the underlying rule actually supports.
 
 Context (JSON):
 ${JSON.stringify(context, null, 2)}`

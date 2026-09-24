@@ -109,16 +109,24 @@ trigger** (`0 5 * * * *` — 5 minutes after Alerts' `0 0 * * * *`, so the two
 engines don't both hit the market-data API at the same instant) that:
 queries every `watchlist` entry across all users, dedupes by
 `(symbol, dataSource, interval)` the same way Alerts dedupes, fetches
-candles once per group, and derives a `signal` (`strong_buy`/`weak_buy`/
-`hold`/`partial_sell`/`strong_sell`) and `trendPhase`
-(`beginning`/`middle`/`end`) from CCI crossing ±100 —
-`src/computeSnapshot.js` is a small state machine, not just a one-shot
-calculation, since telling `weak_buy` (re-entry within an existing uptrend)
-apart from `strong_buy` (a fresh one) requires knowing the *prior* regime,
-which a single hour of indicator values can't tell you. That regime
-(`up`/`down`/`neutral`), a `weakened` flag, and the current trend's start
-time/price are carried forward as extra fields on each `snapshots` document
-specifically so the next hourly run can read them back.
+candles once per group (Twelve Data's documented max, 5000 — the SMA(200)
+below needs that much headroom to warm up), and derives a `signal`
+(`strong_buy`/`hold`/`strong_sell`) and `trendPhase` (`beginning`/`middle`)
+from **CCI(20) crossing the zero line, confirmed only when price agrees
+with the 200-period SMA**. `src/computeSnapshot.js` is a small state
+machine, not just a one-shot calculation, since a rejected (noise)
+crossing needs to know the *current confirmed regime* to reject correctly,
+not just the last signal. That regime (`up`/`down`/`neutral`) and the
+current trend's start time/price are carried forward as extra fields on
+each `snapshots` document specifically so the next hourly run can read
+them back.
+
+This rule was tuned against real data, not guessed — CCI(20) crossing zero
+unfiltered was tried first and found *noisier* than the original CCI(14)/
+±100 rule (326 vs. 163 flips over ~149 days of real USD/CAD 1h data);
+adding the SMA(200) agreement filter cut that to 19, each of which checked
+out as a real trend segment on inspection. See CLAUDE.md's "Watchlist"
+section for the full comparison table.
 
 When a regime flips (an uptrend reversing into `strong_sell`, or vice
 versa), the just-completed run is also written to the `trends` container.

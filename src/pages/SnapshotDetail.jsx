@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { TwelveDataChart } from '../components/TwelveDataChart'
 import { useApi } from '../hooks/useApi'
-import { computeCCI, computeEMA } from '../lib/indicators'
+import { computeCCI, computeSMA } from '../lib/indicators'
 import { describeCondition, PHASE_LABEL, SIGNAL_LABEL, SIGNAL_STYLE } from '../lib/signalLabels'
 
 const OUTPUT_SIZE_BY_INTERVAL = { '1h': 2000, '4h': 2000, '1day': 5000, '1week': 5000 }
@@ -108,15 +108,14 @@ export default function SnapshotDetail() {
 
   const latest = snapshots[snapshots.length - 1]
 
-  // Chart's own indicators, always CCI(14) + EMA 20/50 here since those are exactly
-  // what drives the signal shown below — not the general user-configurable dropdown
-  // from ChartAnalysis.jsx.
+  // Chart's own indicators, always CCI(20) + SMA(200) here since those are exactly what
+  // drives the signal shown below — not the general user-configurable dropdown from
+  // ChartAnalysis.jsx.
   const indicators = useMemo(() => {
     if (candles.length === 0) return {}
     return {
-      cci: { period: 14, points: computeCCI(candles, 14) },
-      ema: { period: 20, points: computeEMA(candles, 20) },
-      sma: { period: 50, points: computeEMA(candles, 50) }, // reuse the dashed "sma" slot to show EMA50 distinctly from EMA20
+      cci: { period: 20, points: computeCCI(candles, 20) },
+      sma: { period: 200, points: computeSMA(candles, 200) },
     }
   }, [candles])
 
@@ -188,10 +187,12 @@ export default function SnapshotDetail() {
       </div>
 
       <p className="mb-3 text-xs text-text-muted">
-        Trend starts (arrows below) mark where CCI(14) crossed ±100 — the only indicator
-        driving these signals. CCI is a lagging momentum oscillator: it confirms a move only
-        after ~14 bars of price action have shifted its average, so a marker can sit well
-        after the price actually turned, not at the exact high/low.
+        Trend starts (arrows below) mark where CCI(20) crossed the zero line — but only
+        when price also agreed with the 200-period SMA's side (above it for an up-start,
+        below it for a down-start). The SMA(200) filter exists specifically to reject
+        counter-trend noise: a zero-line crossing that disagrees with the 200-SMA is
+        treated as noise, not a signal, so far fewer of them get confirmed than raw
+        crossings would suggest.
       </p>
 
       {runStatus && <p className="mb-3 text-xs text-text-muted">{runStatus}</p>}
@@ -224,13 +225,10 @@ export default function SnapshotDetail() {
                 Price <span className="text-text">{latest.price}</span>
               </p>
               <p className="text-text-muted">
-                CCI(14) <span className="text-text">{latest.indicators?.cci?.toFixed(1)}</span>
+                CCI(20) <span className="text-text">{latest.indicators?.cci?.toFixed(1)}</span>
               </p>
               <p className="text-text-muted">
-                EMA 20 / 50{' '}
-                <span className="text-text">
-                  {latest.indicators?.ema20?.toFixed(2) ?? '—'} / {latest.indicators?.ema50?.toFixed(2) ?? '—'}
-                </span>
+                SMA(200) <span className="text-text">{latest.indicators?.sma200?.toFixed(4) ?? '—'}</span>
               </p>
               {elapsedHours !== null && (
                 <p className="text-text-muted">
@@ -328,9 +326,9 @@ export default function SnapshotDetail() {
       </div>
 
       <p className="mt-4 text-xs text-text-muted">
-        Phases: {PHASE_LABEL.beginning} (just crossed ±100), {PHASE_LABEL.middle} (holding), {PHASE_LABEL.end}{' '}
-        (momentum fading, hasn't reversed). Signals are derived only from CCI(14) crossing ±100 — see the Watchlist
-        page for the full rule set.
+        Phases: {PHASE_LABEL.beginning} (just flipped), {PHASE_LABEL.middle} (holding). Signals are strong_buy/
+        strong_sell only — CCI(20) crossing zero, confirmed by SMA(200) agreement — plus hold when nothing's
+        confirmed. See the Watchlist page for the full rule.
       </p>
     </div>
   )
