@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { IdeaDrawer } from '../components/IdeaDrawer'
-import { TradeDrawer } from '../components/TradeDrawer'
 import { useApi } from '../hooks/useApi'
 import { IDEA_STATUS_LABELS } from '../lib/constants'
+import { IdeaDrawer } from './IdeaDrawer'
+import { TradeDrawer } from './TradeDrawer'
 
 function ConfidenceStars({ confidence }) {
   return (
@@ -27,7 +27,7 @@ function IdeaStatusBadge({ status }) {
   )
 }
 
-export default function Ideas() {
+export function IdeasPanel() {
   const api = useApi()
   const [ideas, setIdeas] = useState([])
   const [loading, setLoading] = useState(true)
@@ -91,9 +91,9 @@ export default function Ideas() {
   }
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="h-full overflow-y-auto p-4 sm:p-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-xl font-semibold text-text">Ideas</h1>
+        <h2 className="text-lg font-semibold text-text">Trade ideas</h2>
         <button
           type="button"
           onClick={() => setDrawerIdea(null)}
@@ -115,7 +115,7 @@ export default function Ideas() {
         {sorted.map((idea) => (
           <div key={idea.id} className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
             <div className="flex items-start justify-between gap-2">
-              <h2 className="font-semibold text-text">{idea.instrument}</h2>
+              <h3 className="font-semibold text-text">{idea.instrument}</h3>
               <IdeaStatusBadge status={idea.status} />
             </div>
 

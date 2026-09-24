@@ -61,16 +61,19 @@ trading-journal/
 │   ├── components/
 │   │   ├── NavBar.jsx, PrivateRoute.jsx, TradeDrawer.jsx, TradeSellModal.jsx
 │   │   ├── IdeaDrawer.jsx, StatTile.jsx
+│   │   ├── NotesPanel.jsx, IdeasPanel.jsx  # the two tabs inside /notes (see below)
 │   │   ├── TradingViewWidget.jsx      # embeds TradingView's public tv.js widget
 │   │   ├── TwelveDataChart.jsx        # lightweight-charts render of our own fetched data
 │   │   └── SymbolSearchInput.jsx      # debounced symbol search/autocomplete (Watchlist form)
 │   ├── pages/
 │   │   ├── Landing.jsx, Login.jsx, Register.jsx
-│   │   ├── Dashboard.jsx, Trades.jsx, Ideas.jsx, Notes.jsx
+│   │   ├── Dashboard.jsx, Trades.jsx
+│   │   ├── Notes.jsx                  # /notes — tab switcher over NotesPanel/IdeasPanel
 │   │   ├── Settings.jsx               # Anthropic API key management (BYOK)
 │   │   ├── Assistant.jsx              # chat grounded in journal data
 │   │   ├── ChartAnalysis.jsx          # chart + indicators + chat grounded in chart data
 │   │   ├── Alerts.jsx                 # create/manage price & indicator email alerts
+│   │   ├── AlertChart.jsx             # /alert-chart — instrument chart + an alert's last 10 firings
 │   │   ├── Watchlist.jsx              # opt-in hourly snapshot list + latest signal per symbol
 │   │   └── SnapshotDetail.jsx         # /snapshot — chart + trend history for one symbol
 │   ├── App.jsx
@@ -616,6 +619,14 @@ confidence stars, date, status badge. Actions: promote to trade, mark expired, d
 ### Prompt: Notes page (/notes)
 Left sidebar list + right editor panel. Textarea with large font, auto-save after
 1s debounce. Title = first line. New/delete with confirmation.
+
+**Note:** these two were originally separate nav tabs/routes (`/ideas`,
+`/notes`) as scaffolded above. They're now combined into one `/notes` route
+(`src/pages/Notes.jsx`) with a "Notes"/"Trade ideas" tab switcher — the two
+UIs and data models (`ideas`/`notes` containers, `/api/ideas`/`/api/notes`)
+are otherwise unchanged, just moved into `src/components/NotesPanel.jsx`
+and `src/components/IdeasPanel.jsx` respectively and rendered one at a
+time. There's no `/ideas` route anymore.
 
 ## Phase 4 — Azure Backend
 1. Cosmos DB account (serverless), database `paultrading`, containers

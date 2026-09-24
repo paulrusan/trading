@@ -24,9 +24,6 @@ export function NavBar() {
           <Link to="/trades" className="text-text-muted hover:text-text">
             Trades
           </Link>
-          <Link to="/ideas" className="text-text-muted hover:text-text">
-            Ideas
-          </Link>
           <Link to="/notes" className="text-text-muted hover:text-text">
             Notes
           </Link>

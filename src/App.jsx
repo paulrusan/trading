@@ -7,7 +7,6 @@ import Alerts from './pages/Alerts'
 import Assistant from './pages/Assistant'
 import ChartAnalysis from './pages/ChartAnalysis'
 import Dashboard from './pages/Dashboard'
-import Ideas from './pages/Ideas'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Notes from './pages/Notes'
@@ -39,14 +38,6 @@ function App() {
             element={
               <PrivateRoute>
                 <Trades />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/ideas"
-            element={
-              <PrivateRoute>
-                <Ideas />
               </PrivateRoute>
             }
           />
