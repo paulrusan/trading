@@ -62,9 +62,12 @@ export async function fetchFromTwelveData(symbol, interval, outputsize = '200') 
 
 const YAHOO_INTERVAL = { '1h': '60m', '4h': '60m', '1day': '1d', '1week': '1wk' }
 // Yahoo has no native 4-hour granularity — fetch hourly and bucket it ourselves.
+// Yahoo's own limit is "within the last 730 days" — asking for exactly 730 gets rejected
+// (by the time the request reaches Yahoo's server, `Date.now()` here is already a little
+// in the past, so an exact 730-day window reads as slightly over), so trim a few days off.
 const YAHOO_PERIOD1 = {
-  '1h': () => new Date(Date.now() - 730 * 24 * 60 * 60 * 1000),
-  '4h': () => new Date(Date.now() - 730 * 24 * 60 * 60 * 1000),
+  '1h': () => new Date(Date.now() - 725 * 24 * 60 * 60 * 1000),
+  '4h': () => new Date(Date.now() - 725 * 24 * 60 * 60 * 1000),
   '1day': () => new Date('1995-01-01'),
   '1week': () => new Date('1990-01-01'),
 }
