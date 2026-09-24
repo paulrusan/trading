@@ -130,11 +130,11 @@ export default function Watchlist() {
       </div>
 
       <p className="mb-4 text-sm text-text-muted">
-        Symbols here get an hourly snapshot (price, CCI(20), SMA(200), and a signal —
-        strong buy/hold/strong sell) from CCI(20) crossing the zero line, confirmed only
-        when price agrees with the 200-period SMA to filter out counter-trend noise. Claude
-        reads this history when you ask about a watched symbol; it doesn't recompute it
-        live.
+        Symbols here get an hourly snapshot (price, CCI(20), SMA(200), and a signal).
+        Price above SMA(200) is an uptrend, below it a downtrend. Every time CCI(20)
+        crosses the zero line it's a signal — buy/exit long in an uptrend, short/exit
+        short in a downtrend. Claude reads this history when you ask about a watched
+        symbol; it doesn't recompute it live.
       </p>
 
       {runStatus && <p className="mb-4 text-sm text-text-muted">{runStatus}</p>}

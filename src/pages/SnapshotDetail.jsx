@@ -3,11 +3,9 @@ import { useSearchParams } from 'react-router-dom'
 import { TwelveDataChart } from '../components/TwelveDataChart'
 import { useApi } from '../hooks/useApi'
 import { computeCCI, computeSMA } from '../lib/indicators'
-import { describeCondition, PHASE_LABEL, SIGNAL_LABEL, SIGNAL_STYLE } from '../lib/signalLabels'
+import { describeCondition, POSITION_LABEL, SIGNAL_LABEL, SIGNAL_MARKER, SIGNAL_STYLE } from '../lib/signalLabels'
 
 const OUTPUT_SIZE_BY_INTERVAL = { '1h': 2000, '4h': 2000, '1day': 5000, '1week': 5000 }
-const UP_COLOR = '#22c55e'
-const DOWN_COLOR = '#ef4444'
 
 function toUnixSeconds(iso) {
   return Math.floor(new Date(iso).getTime() / 1000)
@@ -119,37 +117,29 @@ export default function SnapshotDetail() {
     }
   }, [candles])
 
-  // Every closed trend's start, plus the current still-open trend's start (which has
-  // no `trends` doc yet since that's only written when a trend closes).
+  // One marker per signal event (every CCI zero-line crossing) — buy/short as arrows
+  // into the bar, exit_long/exit_short as an "X" on the opposite side.
   const markers = useMemo(() => {
-    const result = trends.map((t) => ({
-      time: toUnixSeconds(t.startTime),
-      color: t.direction === 'up' ? UP_COLOR : DOWN_COLOR,
-      shape: t.direction === 'up' ? 'arrowUp' : 'arrowDown',
-      text: `${t.direction === 'up' ? 'Up' : 'Down'} start (CCI)`,
-    }))
-    if (latest?.trendStartTime && latest.regime !== 'neutral') {
-      result.push({
-        time: toUnixSeconds(latest.trendStartTime),
-        color: latest.regime === 'up' ? UP_COLOR : DOWN_COLOR,
-        shape: latest.regime === 'up' ? 'arrowUp' : 'arrowDown',
-        text: 'Current start (CCI)',
-        position: 'belowBar',
-      })
-    }
-    return result
-  }, [trends, latest])
+    return snapshots
+      .filter((s) => s.signal !== 'hold' && SIGNAL_MARKER[s.signal])
+      .map((s) => ({
+        time: toUnixSeconds(s.timestamp),
+        ...SIGNAL_MARKER[s.signal],
+      }))
+  }, [snapshots])
 
-  const recentTrends = trends.slice(-3).reverse()
-  const avgTrendHours =
-    recentTrends.length > 0
-      ? recentTrends.reduce((sum, t) => sum + hoursBetween(t.startTime, t.endTime), 0) / recentTrends.length
+  const recentTrades = trends.slice(-3).reverse()
+  const avgTradeHours =
+    recentTrades.length > 0
+      ? recentTrades.reduce((sum, t) => sum + hoursBetween(t.startTime, t.endTime), 0) / recentTrades.length
       : null
 
-  const elapsedHours = latest?.trendStartTime ? hoursBetween(latest.trendStartTime, latest.timestamp) : null
+  const elapsedHours = latest?.positionStartTime ? hoursBetween(latest.positionStartTime, latest.timestamp) : null
   const movePct =
-    latest?.trendStartPrice && latest.trendStartPrice !== 0
-      ? ((latest.price - latest.trendStartPrice) / latest.trendStartPrice) * 100
+    latest?.positionStartPrice && latest.positionStartPrice !== 0
+      ? latest.position === 'short'
+        ? ((latest.positionStartPrice - latest.price) / latest.positionStartPrice) * 100
+        : ((latest.price - latest.positionStartPrice) / latest.positionStartPrice) * 100
       : null
 
   if (!symbol) {
@@ -187,12 +177,11 @@ export default function SnapshotDetail() {
       </div>
 
       <p className="mb-3 text-xs text-text-muted">
-        Trend starts (arrows below) mark where CCI(20) crossed the zero line — but only
-        when price also agreed with the 200-period SMA's side (above it for an up-start,
-        below it for a down-start). The SMA(200) filter exists specifically to reject
-        counter-trend noise: a zero-line crossing that disagrees with the 200-SMA is
-        treated as noise, not a signal, so far fewer of them get confirmed than raw
-        crossings would suggest.
+        Price above SMA(200) is an uptrend, below it a downtrend. Every time CCI(20)
+        crosses the zero line, that's a signal — up-cross in an uptrend enters a long
+        (green arrow), down-cross in an uptrend exits it (green ✕); down-cross in a
+        downtrend enters a short (red arrow), up-cross in a downtrend exits it (red ✕).
+        Every crossing produces a signal — none are filtered out.
       </p>
 
       {runStatus && <p className="mb-3 text-xs text-text-muted">{runStatus}</p>}
@@ -232,12 +221,13 @@ export default function SnapshotDetail() {
               </p>
               {elapsedHours !== null && (
                 <p className="text-text-muted">
-                  Current trend running <span className="text-text">{formatHours(elapsedHours)}</span>
+                  {POSITION_LABEL[latest.position] ?? latest.position} position running{' '}
+                  <span className="text-text">{formatHours(elapsedHours)}</span>
                 </p>
               )}
               {movePct !== null && (
                 <p className="text-text-muted">
-                  Move since trend start{' '}
+                  Open P/L{' '}
                   <span className={movePct >= 0 ? 'text-profit' : 'text-loss'}>
                     {movePct >= 0 ? '+' : ''}
                     {movePct.toFixed(2)}%
@@ -258,28 +248,28 @@ export default function SnapshotDetail() {
       </div>
 
       <div className="mb-6 rounded-lg border border-border bg-surface p-4">
-        <h2 className="mb-1 text-sm font-medium text-text-muted">Estimated trend duration</h2>
-        {avgTrendHours === null ? (
+        <h2 className="mb-1 text-sm font-medium text-text-muted">Estimated trade duration</h2>
+        {avgTradeHours === null ? (
           <p className="text-sm text-text-muted">
-            Not enough completed trends yet to estimate — needs at least one full reversal.
+            Not enough closed trades yet to estimate — needs at least one full entry/exit.
           </p>
         ) : (
           <p className="text-sm text-text">
-            The last {recentTrends.length} completed trend{recentTrends.length === 1 ? '' : 's'} averaged{' '}
-            <span className="font-medium">{formatHours(avgTrendHours)}</span>.
+            The last {recentTrades.length} closed trade{recentTrades.length === 1 ? '' : 's'} averaged{' '}
+            <span className="font-medium">{formatHours(avgTradeHours)}</span>.
             {elapsedHours !== null && (
               <>
                 {' '}
-                The current trend has been running for{' '}
+                The current {POSITION_LABEL[latest.position]?.toLowerCase()} has been running for{' '}
                 <span className="font-medium">{formatHours(elapsedHours)}</span> —{' '}
-                {elapsedHours < avgTrendHours ? (
+                {elapsedHours < avgTradeHours ? (
                   <>
                     based on that average, roughly{' '}
-                    <span className="font-medium">{formatHours(avgTrendHours - elapsedHours)}</span> of runway left,
-                    if this trend behaves like recent ones.
+                    <span className="font-medium">{formatHours(avgTradeHours - elapsedHours)}</span> until a typical
+                    exit, if this trade behaves like recent ones.
                   </>
                 ) : (
-                  <>already past that average — it may be closer to its end than its beginning.</>
+                  <>already past that average — it may be closer to an exit than its entry.</>
                 )}
               </>
             )}{' '}
@@ -289,26 +279,26 @@ export default function SnapshotDetail() {
       </div>
 
       <div className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="mb-3 text-sm font-medium text-text-muted">Previous 3 trends</h2>
-        {recentTrends.length === 0 ? (
-          <p className="text-sm text-text-muted">No completed trends yet.</p>
+        <h2 className="mb-3 text-sm font-medium text-text-muted">Previous 3 trades</h2>
+        {recentTrades.length === 0 ? (
+          <p className="text-sm text-text-muted">No closed trades yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="text-xs text-text-muted">
                   <th className="pb-2 pr-4 font-normal">Direction</th>
-                  <th className="pb-2 pr-4 font-normal">Start</th>
-                  <th className="pb-2 pr-4 font-normal">End</th>
+                  <th className="pb-2 pr-4 font-normal">Entry</th>
+                  <th className="pb-2 pr-4 font-normal">Exit</th>
                   <th className="pb-2 pr-4 font-normal">Duration</th>
-                  <th className="pb-2 font-normal">Move</th>
+                  <th className="pb-2 font-normal">P/L</th>
                 </tr>
               </thead>
               <tbody>
-                {recentTrends.map((t) => (
+                {recentTrades.map((t) => (
                   <tr key={t.id} className="border-t border-border">
-                    <td className={`py-2 pr-4 ${t.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
-                      {t.direction === 'up' ? 'Up' : 'Down'}
+                    <td className={`py-2 pr-4 ${t.direction === 'long' ? 'text-profit' : 'text-loss'}`}>
+                      {t.direction === 'long' ? 'Long' : 'Short'}
                     </td>
                     <td className="py-2 pr-4 text-text-muted">{new Date(t.startTime).toLocaleString()}</td>
                     <td className="py-2 pr-4 text-text-muted">{new Date(t.endTime).toLocaleString()}</td>
@@ -326,9 +316,9 @@ export default function SnapshotDetail() {
       </div>
 
       <p className="mt-4 text-xs text-text-muted">
-        Phases: {PHASE_LABEL.beginning} (just flipped), {PHASE_LABEL.middle} (holding). Signals are strong_buy/
-        strong_sell only — CCI(20) crossing zero, confirmed by SMA(200) agreement — plus hold when nothing's
-        confirmed. See the Watchlist page for the full rule.
+        Signals: {SIGNAL_LABEL.buy} / {SIGNAL_LABEL.exit_long} in an uptrend (price above SMA(200)),{' '}
+        {SIGNAL_LABEL.short} / {SIGNAL_LABEL.exit_short} in a downtrend — each triggered by CCI(20) crossing the
+        zero line. See the Watchlist page for the full rule.
       </p>
     </div>
   )

@@ -8,84 +8,92 @@ function lastTwo(points) {
   return { prev: points[points.length - 2], curr: points[points.length - 1] }
 }
 
-// Trend rule, tuned against real data rather than guessed: CCI(20) crossing the zero
-// line marks a trend flip, but only counts when price agrees with the 200-period SMA's
-// side (price above it for an up-flip, below it for a down-flip) — the SMA(200) filters
-// out counter-trend noise from the zero-line crossing, which alone is far noisier than
-// it looks (see CLAUDE.md's "Watchlist" section for the comparison numbers). Verified
-// against ~149 days of real USD/CAD 1h data before shipping: raw CCI(20) zero-crossing
-// alone gave 326 flips; adding the SMA(200) filter cut that to 19, and each of those 19
-// checked out as a real, sensible trend segment (including one that ran the entire
-// June-July period) rather than noise.
-//
-// This replaces the old CCI(14)/+-100 rule, which had its own weak_buy/partial_sell
-// distinction for re-entries and fading momentum near the +-100 extreme. There's no
-// natural equivalent of that here — a rejected crossing is just noise, not a distinct
-// state — so the signal set is simpler: strong_buy / strong_sell / hold.
+// A real long/short trading rule, not just a trend detector:
+//   - price vs SMA(200) sets the regime: above it is "up", below it is "down".
+//   - CCI(20) crossing the zero line is the trigger — but what a crossing MEANS
+//     depends entirely on the regime at that moment:
+//       up-regime,   CCI crosses up   -> enter long   (buy)
+//       up-regime,   CCI crosses down -> exit the long (exit_long)
+//       down-regime, CCI crosses down -> enter short  (short)
+//       down-regime, CCI crosses up   -> exit the short (exit_short)
+// Every zero-line crossing produces one of those four signals — none are filtered
+// out as noise the way the old SMA(200)-agreement rule rejected them. The regime
+// gate means an entry only ever fires in the direction of the 200-SMA trend, and
+// an open position is always closed by the *next* opposite crossing rather than
+// waiting for the regime to also flip, so a trade's holding time is bounded by
+// CCI(20) alone. position/positionStartTime/positionStartPrice are carried
+// forward on the snapshot doc so the next hourly run knows what (if anything) is
+// currently open.
 function stepSignal({ prevCci, currCci, price, sma200, timestamp, prevState }) {
-  const { regime, trendStartTime, trendStartPrice } = prevState
+  const { position, positionStartTime, positionStartPrice } = prevState
+
+  const trendUp = sma200 != null && price > sma200
+  const trendDown = sma200 != null && price < sma200
+  const regime = trendUp ? 'up' : trendDown ? 'down' : 'neutral'
 
   const crossedUp = prevCci <= 0 && currCci > 0
   const crossedDown = prevCci >= 0 && currCci < 0
-  // No SMA(200) yet (still warming up) — don't filter, but don't confirm either; treat
-  // as if the crossing didn't happen rather than accepting it unfiltered.
-  const agreesUp = sma200 != null && price > sma200
-  const agreesDown = sma200 != null && price < sma200
 
   let signal = 'hold'
-  let trendPhase = regime === 'neutral' ? 'beginning' : 'middle'
-  let nextRegime = regime
-  let nextTrendStartTime = trendStartTime
-  let nextTrendStartPrice = trendStartPrice
-  let closedTrend = null
+  let nextPosition = position
+  let nextPositionStartTime = positionStartTime
+  let nextPositionStartPrice = positionStartPrice
+  let closedTrade = null
 
-  if (crossedUp && agreesUp && regime !== 'up') {
-    if (regime === 'down' && trendStartTime) {
-      closedTrend = {
-        direction: 'down',
-        startTime: trendStartTime,
+  if (crossedUp && trendUp) {
+    signal = 'buy'
+    nextPosition = 'long'
+    nextPositionStartTime = timestamp
+    nextPositionStartPrice = price
+  } else if (crossedDown && trendDown) {
+    signal = 'short'
+    nextPosition = 'short'
+    nextPositionStartTime = timestamp
+    nextPositionStartPrice = price
+  } else if (crossedDown && trendUp) {
+    signal = 'exit_long'
+    if (position === 'long' && positionStartTime) {
+      closedTrade = {
+        direction: 'long',
+        startTime: positionStartTime,
         endTime: timestamp,
-        startPrice: trendStartPrice,
+        startPrice: positionStartPrice,
         endPrice: price,
-        movePct: ((price - trendStartPrice) / trendStartPrice) * 100,
+        movePct: ((price - positionStartPrice) / positionStartPrice) * 100,
       }
     }
-    signal = 'strong_buy'
-    trendPhase = 'beginning'
-    nextRegime = 'up'
-    nextTrendStartTime = timestamp
-    nextTrendStartPrice = price
-  } else if (crossedDown && agreesDown && regime !== 'down') {
-    if (regime === 'up' && trendStartTime) {
-      closedTrend = {
-        direction: 'up',
-        startTime: trendStartTime,
+    nextPosition = 'flat'
+    nextPositionStartTime = null
+    nextPositionStartPrice = null
+  } else if (crossedUp && trendDown) {
+    signal = 'exit_short'
+    if (position === 'short' && positionStartTime) {
+      closedTrade = {
+        direction: 'short',
+        startTime: positionStartTime,
         endTime: timestamp,
-        startPrice: trendStartPrice,
+        startPrice: positionStartPrice,
         endPrice: price,
-        movePct: ((price - trendStartPrice) / trendStartPrice) * 100,
+        movePct: ((positionStartPrice - price) / positionStartPrice) * 100,
       }
     }
-    signal = 'strong_sell'
-    trendPhase = 'beginning'
-    nextRegime = 'down'
-    nextTrendStartTime = timestamp
-    nextTrendStartPrice = price
+    nextPosition = 'flat'
+    nextPositionStartTime = null
+    nextPositionStartPrice = null
   }
 
   return {
     signal,
-    trendPhase,
-    regime: nextRegime,
-    trendStartTime: nextTrendStartTime,
-    trendStartPrice: nextTrendStartPrice,
-    closedTrend,
+    regime,
+    position: nextPosition,
+    positionStartTime: nextPositionStartTime,
+    positionStartPrice: nextPositionStartPrice,
+    closedTrade,
   }
 }
 
-// regime/trendStartTime/trendStartPrice are carried forward on the snapshot doc itself
-// as bookkeeping fields so the next hourly run can read them back — a rejected (noise)
-// crossing needs to know the CURRENT confirmed regime, not just the last signal.
+// position/positionStartTime/positionStartPrice are carried forward on the snapshot doc
+// itself as bookkeeping fields so the next hourly run can read back what's currently open.
 export function computeSnapshotUpdate(candles, prevSnapshot) {
   const cci = computeCCI(candles, CCI_PERIOD)
   const aligned = lastTwo(cci)
@@ -99,9 +107,9 @@ export function computeSnapshotUpdate(candles, prevSnapshot) {
   const sma200Now = sma200[sma200.length - 1]?.value ?? null
 
   const prevState = {
-    regime: prevSnapshot?.regime ?? 'neutral',
-    trendStartTime: prevSnapshot?.trendStartTime ?? null,
-    trendStartPrice: prevSnapshot?.trendStartPrice ?? null,
+    position: prevSnapshot?.position ?? 'flat',
+    positionStartTime: prevSnapshot?.positionStartTime ?? null,
+    positionStartPrice: prevSnapshot?.positionStartPrice ?? null,
   }
   const step = stepSignal({
     prevCci: aligned.prev.value,
@@ -118,25 +126,25 @@ export function computeSnapshotUpdate(candles, prevSnapshot) {
       price,
       indicators: { cci: aligned.curr.value, sma200: sma200Now },
       signal: step.signal,
-      trendPhase: step.trendPhase,
       regime: step.regime,
-      trendStartTime: step.trendStartTime,
-      trendStartPrice: step.trendStartPrice,
+      position: step.position,
+      positionStartTime: step.positionStartTime,
+      positionStartPrice: step.positionStartPrice,
     },
-    closedTrend: step.closedTrend,
+    closedTrade: step.closedTrade,
   }
 }
 
-// One-time (or re-run on demand) reconstruction of signal/trend history from candles
+// One-time (or re-run on demand) reconstruction of signal/trade history from candles
 // already on hand, rather than only ever accumulating forward from whenever a symbol was
 // added to the watchlist. Replays the exact same stepSignal logic bar-by-bar, so the
 // result is identical to what the live hourly engine would have produced had it been
 // running the entire time.
 //
-// Returns every bar where something happened (a non-'hold' signal) plus the final bar
-// (the current state) — not every single 'hold' bar, which for a few thousand hourly
-// candles would mean a few thousand near-identical Cosmos writes for one on-demand
-// action. `trends` are always complete, since those only get written on an actual close.
+// Returns every bar where something happened (a non-'hold' signal — i.e. every CCI
+// zero-line crossing) plus the final bar (the current state) — not every single 'hold'
+// bar, which for a few thousand hourly candles would mean a few thousand near-identical
+// Cosmos writes for one on-demand action. `trends` are always complete, closed trades.
 export function backfillTrendHistory(candles) {
   const cci = computeCCI(candles, CCI_PERIOD)
   if (cci.length < 2) return { events: [], trends: [] }
@@ -145,7 +153,7 @@ export function backfillTrendHistory(candles) {
   const sma200 = computeSMA(candles, MA_PERIOD)
   const timeToSma200 = new Map(sma200.map((p) => [p.time, p.value]))
 
-  let state = { regime: 'neutral', trendStartTime: null, trendStartPrice: null }
+  let state = { position: 'flat', positionStartTime: null, positionStartPrice: null }
   const events = []
   const trends = []
 
@@ -164,11 +172,11 @@ export function backfillTrendHistory(candles) {
       prevState: state,
     })
     state = {
-      regime: step.regime,
-      trendStartTime: step.trendStartTime,
-      trendStartPrice: step.trendStartPrice,
+      position: step.position,
+      positionStartTime: step.positionStartTime,
+      positionStartPrice: step.positionStartPrice,
     }
-    if (step.closedTrend) trends.push(step.closedTrend)
+    if (step.closedTrade) trends.push(step.closedTrade)
 
     const isLast = i === cci.length - 1
     if (step.signal !== 'hold' || isLast) {
@@ -177,10 +185,10 @@ export function backfillTrendHistory(candles) {
         price: candle.close,
         indicators: { cci: cci[i].value, sma200: sma200Now },
         signal: step.signal,
-        trendPhase: step.trendPhase,
         regime: step.regime,
-        trendStartTime: step.trendStartTime,
-        trendStartPrice: step.trendStartPrice,
+        position: step.position,
+        positionStartTime: step.positionStartTime,
+        positionStartPrice: step.positionStartPrice,
       })
     }
   }

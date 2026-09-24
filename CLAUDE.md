@@ -35,7 +35,7 @@ trading-journal/
 │   │   ├── marketDataFetchers.js      # fetchFromTwelveData/fetchFromYahoo, shared by
 │   │   │                              #   marketData.js and both hourly engines below
 │   │   ├── evaluateAlert.js           # edge-triggered condition evaluation for alerts
-│   │   ├── computeSnapshot.js         # CCI-crossing signal/trend-phase state machine
+│   │   ├── computeSnapshot.js         # CCI(20)/SMA(200) long/short signal state machine
 │   │   ├── sendEmail.js               # Gmail SMTP via nodemailer
 │   │   ├── lib/indicators.js          # server-side port of src/lib/indicators.js
 │   │   └── functions/
@@ -57,7 +57,7 @@ trading-journal/
 │   │   ├── tradePnl.js, dashboardStats.js, format.js, constants.js
 │   │   ├── chartColors.js             # usePrefersDark, getChartColors (literal hex, not CSS vars)
 │   │   ├── indicators.js              # pure indicator math — see below
-│   │   └── signalLabels.js            # SIGNAL_LABEL/SIGNAL_STYLE/PHASE_LABEL/describeCondition
+│   │   └── signalLabels.js            # SIGNAL_LABEL/SIGNAL_STYLE/POSITION_LABEL/SIGNAL_MARKER/describeCondition
 │   ├── components/
 │   │   ├── NavBar.jsx, PrivateRoute.jsx, TradeDrawer.jsx, TradeSellModal.jsx
 │   │   ├── IdeaDrawer.jsx, StatTile.jsx
@@ -338,7 +338,7 @@ exposed as `POST /api/alerts/run` for on-demand testing, surfaced as a
 Unlike Alerts (which evaluates conditions transiently and only acts on a
 crossing), the Watchlist persists an ongoing history: any symbol a user adds
 gets an **hourly snapshot** (price, CCI(20), SMA(200), a derived `signal`,
-and a `trendPhase`) via `api/src/functions/snapshotsEngine.js` — a second
+`regime`, and `position`) via `api/src/functions/snapshotsEngine.js` — a second
 timer trigger (`0 5 * * * *`, offset 5 minutes from Alerts' `0 0 * * * *` so
 the two engines don't both hit the market-data API in the same instant)
 that also exposes `POST /api/snapshots/run` for local testing, same
@@ -359,55 +359,62 @@ underlying market data is the same regardless of who's watching):
   timestamp: string,        // ISO, hourly
   price: number,
   indicators: { cci: number, sma200: number | null },
-  signal: 'strong_buy' | 'hold' | 'strong_sell',
-  trendPhase: 'beginning' | 'middle',
-  // Internal bookkeeping the engine needs across hourly runs — 'hold' alone can't tell
-  // you whether the underlying trend is up/down, so this is carried forward rather than
-  // re-derived from the previous doc's `signal` field.
-  regime: 'up' | 'down' | 'neutral',
-  trendStartTime: string | null,
-  trendStartPrice: number | null,
+  signal: 'buy' | 'short' | 'exit_long' | 'exit_short' | 'hold',
+  regime: 'up' | 'down' | 'neutral',   // price vs SMA(200), recomputed every bar
+  // Internal bookkeeping the engine needs across hourly runs — what's currently open, so
+  // the next crossing (in either direction) knows what it's closing, if anything.
+  position: 'long' | 'short' | 'flat',
+  positionStartTime: string | null,
+  positionStartPrice: number | null,
 }
 
-// trends — a completed run, written when the regime flips
+// trends — a closed trade, written when a position is exited
 {
   id: string,                // `${symbol}_${dataSource}_${interval}_${startTime}`, '/' sanitized
   symbol: string,
   dataSource: 'twelvedata' | 'yahoo',
   interval: '1h' | '4h' | '1day' | '1week',
-  direction: 'up' | 'down',
-  startTime: string,
-  endTime: string,
-  startPrice: number,
-  endPrice: number,
-  movePct: number,
+  direction: 'long' | 'short',
+  startTime: string,         // entry
+  endTime: string,           // exit
+  startPrice: number,        // entry price
+  endPrice: number,          // exit price
+  movePct: number,           // signed so a profitable short is positive, same as a profitable long
 }
 
 // watchlist — per-user opt-in list of what to snapshot (partition key /userId, unlike the two above)
 { id: string, userId: string, symbol: string, dataSource: string, interval: string, createdAt: string }
 ```
 
-**Signal rule** (`api/src/computeSnapshot.js`) — **recalibrated from the
-original CCI(14)/±100 rule below in "Trading Strategy Context" after
-empirical testing showed that rule (and naive alternatives) didn't hold
-up**:
-- `strong_buy` — CCI(20) crosses above 0 **and** price is above the SMA(200) at that bar. Closes a prior `down` trend if one was open. `trendPhase: 'beginning'`.
-- `strong_sell` — CCI(20) crosses below 0 **and** price is below the SMA(200). Closes a prior `up` trend. `trendPhase: 'beginning'`.
-- `hold` — no crossing, or a crossing that didn't agree with the SMA(200) (rejected as noise, regime unchanged). `trendPhase: 'middle'` once a regime is established, `'beginning'` while still `'neutral'`.
+**Signal rule** (`api/src/computeSnapshot.js`) — **rewritten from the
+CCI(20)/SMA(200)-agreement rule below in "Trading Strategy Context" into an
+actual long/short trading system, per the user's spec**: price above
+SMA(200) is an uptrend, below it a downtrend; CCI(20) crossing the zero
+line is the trigger, and what a crossing means depends entirely on the
+regime at that moment:
+- up-regime, CCI crosses up → `buy` (enter long)
+- up-regime, CCI crosses down → `exit_long`
+- down-regime, CCI crosses down → `short` (enter short)
+- down-regime, CCI crosses up → `exit_short`
 
-No `weak_buy`/`partial_sell` here (unlike the old ±100 rule, which used the
-extreme band to distinguish a fresh trend from a re-entry, and a fading-
-but-not-reversed state) — with a two-state up/down regime there's no
-natural middle state; a rejected crossing is just noise, not a distinct
-signal.
+Every zero-line crossing produces one of these four signals — **nothing is
+filtered out as noise** (unlike the CCI(20)/SMA(200)-agreement rule this
+replaced, which rejected disagreeing crossings). The regime gate means an
+entry only ever fires in the direction of the 200-SMA trend, but an open
+position is always closed by the very next opposite-direction crossing,
+regardless of whether the regime has flipped too — so a trade's holding
+time is bounded by CCI(20) alone, not by also waiting for SMA(200) to
+catch up.
 
-**Why this rule, not something simpler** — measured against ~149 days of
-real USD/CAD 1h data before choosing it (reproducible with
-`computeCCI`/`computeSMA` directly against `fetchFromTwelveData` output,
-same as the checks that produced these numbers):
-- CCI(14)/±100 (the original rule): 163 trend-flips.
-- CCI(20) crossing zero, unfiltered: 326 flips — **noisier than ±100, not calmer**, because 0 sits in the middle of the oscillator's range and price barely has to move to cross it; a longer period alone doesn't fix this (CCI(200) zero-crossing was still 45 flips, comparable to CCI(55)/±100's 42).
-- **CCI(20) crossing zero, confirmed only when price agrees with SMA(200): 19 flips.** Spot-checked against the real chart — each of the 19 held up as a real trend segment, including one that ran the entire June-to-July period. This is the rule that shipped.
+**Known tradeoff, not yet mitigated** — because every crossing fires,
+this whipsaws in choppy/range-bound conditions: back-tested against ~149
+days of real USD/CAD 1h data, it produced 304 signal events / 141 closed
+trades (vs. 19 flips for the SMA(200)-agreement rule it replaced), a 35.5%
+win rate, and a lot of very short round trips worth only a few basis
+points each — before spread/costs, which would likely erase the (already
+thin, ~+5.8% cumulative) edge entirely. The user's plan is to layer
+additional conditions on top of this base system next (see "Trading
+Strategy Context" below), rather than tune this rule further in isolation.
 
 **Read endpoints**: `GET /api/snapshots` / `GET /api/trends`
 (`?symbol=&dataSource=&interval=&limit=`) are GET-only (system-written data,
@@ -434,23 +441,31 @@ every historical hourly bar. `/snapshot` (`SnapshotDetail.jsx`) triggers
 this automatically the first time it loads a symbol with no trend history
 yet, plus a manual "Backfill history" button.
 
+**Chart markers**: one per signal event (every CCI zero-line crossing, not
+just trend starts) — `buy`/`short` render as a green up-arrow / red
+down-arrow into the bar, `exit_long`/`exit_short` as a green/red "✕" on the
+opposite side, so an entry and its exit visually bracket one trade.
+`src/lib/signalLabels.js`'s `SIGNAL_MARKER` holds the shape/color/position
+per signal, consumed by both `SnapshotDetail.jsx` (building the `markers`
+array from `snapshots`) and `TwelveDataChart.jsx`'s `createSeriesMarkers`
+call (mapped through the same real-time -> index lookup as everything else
+in that component). The CCI pane also always draws a zero price line
+(`createPriceLine` on the CCI series) since it's the actual signal
+trigger, not just a reference level.
+
 **Snapshot detail page** (`/snapshot?symbol=&dataSource=&interval=`,
 `SnapshotDetail.jsx`): opens in a new tab from a "View" link on each
 Watchlist row. Shows the price chart (with SMA(200) overlaid — the only
 overlay shown, so the chart's own price badge on the right edge stays
-singular rather than stacking one per indicator) with markers at every
-trend's start (closed ones from `trends`, plus the current still-open one
-from the latest snapshot's `trendStartTime`, added via a `markers` prop on
-`TwelveDataChart.jsx` — `createSeriesMarkers` from `lightweight-charts`,
-mapped through the same real-time -> index lookup as everything else in
-that component), current condition (signal/regime/phase, CCI(20),
-SMA(200), how long the trend's been running, % move since it started), an
-estimated remaining duration (average of the last 3 completed trends vs.
-elapsed — explicitly framed as a rough average of past behavior, not a
-prediction), and a table of the previous 3 trends. `src/lib/signalLabels.js`
-holds the shared signal/phase vocabulary (`SIGNAL_LABEL`, `SIGNAL_STYLE`,
-`PHASE_LABEL`, `describeCondition`) so this page and the Watchlist list
-view stay consistent.
+singular rather than stacking one per indicator) with the signal markers
+above, current condition (signal/regime/position, CCI(20), SMA(200), how
+long the current position's been open, open P/L), an estimated trade
+duration (average of the last 3 closed trades vs. elapsed on the current
+one — explicitly framed as a rough average of past behavior, not a
+prediction), and a table of the previous 3 closed trades. `src/lib/signalLabels.js`
+holds the shared signal/position vocabulary (`SIGNAL_LABEL`, `SIGNAL_STYLE`,
+`POSITION_LABEL`, `SIGNAL_MARKER`, `describeCondition`) so this page and
+the Watchlist list view stay consistent.
 
 Every price-pane overlay series in `TwelveDataChart.jsx` (EMA, SMA,
 Bollinger Bands, SAR) sets `lastValueVisible: false, priceLineVisible:
@@ -468,10 +483,12 @@ visible on this page, which always shows one).
   Analysis" above)
 
 **Note:** this is the original strategy spec, kept here for context. The
-Watchlist engine's actual signal rule has since been recalibrated from it
-based on empirical testing against real data — see "Watchlist" above for
-the rule that's actually implemented (CCI(20) crossing zero, confirmed by
-SMA(200) agreement) and the numbers that led there.
+Watchlist engine's actual signal rule has been rebuilt twice since — see
+"Watchlist" above for the rule that's actually implemented today (a real
+long/short system: SMA(200) sets the regime, CCI(20) zero-crossings are
+entries/exits, every crossing fires) and the empirical numbers behind each
+iteration. The user's stated plan is to add further conditions on top of
+this base system next — check here first before assuming this is final.
 
 ## Phase 1 — Scaffold & Deploy
 1. Run in terminal (outside Claude Code):

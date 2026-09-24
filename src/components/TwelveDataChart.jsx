@@ -238,6 +238,18 @@ export function TwelveDataChart({
           const s = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
           s.setData(reindex(indicators[key].points))
           hitTestSeries.push({ key, series: s })
+          // CCI's zero line is the actual signal trigger (see computeSnapshot.js) —
+          // always show it so a crossing is visible at a glance, not just inferable.
+          if (key === 'cci') {
+            s.createPriceLine({
+              price: 0,
+              color: colors.textMuted,
+              lineWidth: 1,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: '',
+            })
+          }
         } else if (key === 'macd') {
           const macdSeries = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
           macdSeries.setData(reindex(indicators.macd.macdLine))
