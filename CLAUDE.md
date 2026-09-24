@@ -1,11 +1,17 @@
 # Trading Journal — Project Instructions
 
 ## Project Overview
-Personal trading journal web app. Instruments are free-text (not a fixed
-list) — Gold, Silver, Nasdaq, and S&P 500 are just the default suggestions.
-Stack: Vite + React, Tailwind CSS, Recharts, React Router, Firebase Auth.
+Personal trading journal + charting web app. Instruments are free-text
+everywhere (not a fixed list) — any symbol can be journaled or charted;
+Gold/Silver/Nasdaq/S&P 500 are just default suggestions in a couple of UIs.
+Stack: Vite + React, Tailwind CSS, Recharts (journal charts), TradingView's
+public embeddable widget + `lightweight-charts` (market charting), React
+Router, Firebase Auth.
 Hosting: GitHub Pages (gh-pages branch, auto-deploy via GitHub Actions).
-Backend (Phase 4): Azure Functions + Cosmos DB serverless.
+Backend: Azure Functions (Flex Consumption) + Cosmos DB, deployed via OIDC.
+Market data: Twelve Data API (`time_series` + `symbol_search`), proxied
+through our own Function App so the API key never reaches the browser.
+AI: Anthropic API, bring-your-own-key per user (see "AI Assistant" below).
 
 ## Design System
 - Dark navy theme as default, light mode supported
@@ -17,27 +23,44 @@ Backend (Phase 4): Azure Functions + Cosmos DB serverless.
 ## File Structure
 ```
 trading-journal/
-├── .github/workflows/deploy.yml   # GitHub Actions auto-deploy
+├── .github/workflows/
+│   ├── deploy.yml                     # frontend → GitHub Pages
+│   └── main_paultrading.yml           # api/** → Azure Functions (OIDC)
+├── api/                                # Azure Functions v4, Node.js, Flex Consumption
+│   ├── src/
+│   │   ├── cosmosClient.js            # lazy-init Cosmos client (see gotcha below)
+│   │   ├── verifyAuth.js              # lazy-init Firebase Admin, verifies Bearer token
+│   │   ├── crudRoutes.js              # generic CRUD factory for trades/ideas/notes
+│   │   └── functions/
+│   │       ├── trades.js, ideas.js, notes.js   # registerCrudRoutes(...)
+│   │       ├── settings.js            # per-user settings (Anthropic key)
+│   │       ├── assistant.js           # POST /api/assistant — Claude, server-side key
+│   │       ├── marketData.js          # GET /api/market-data — Twelve Data time_series proxy
+│   │       └── symbolSearch.js        # GET /api/symbol-search — Twelve Data symbol_search proxy
+│   ├── local.settings.json(.example)
+│   └── README.md                      # endpoints, local dev, Flex Consumption deploy notes
 ├── src/
-│   ├── firebase.js                # Firebase init + auth export
-│   ├── context/AuthContext.jsx    # useAuth hook + AuthProvider
-│   ├── hooks/useStorage.js        # localStorage data layer (Phase 1-3)
-│   ├── hooks/useApi.js            # Azure Functions data layer (Phase 4)
+│   ├── firebase.js
+│   ├── context/AuthContext.jsx
+│   ├── hooks/useApi.js                # all API calls; loading/error state
+│   ├── lib/
+│   │   ├── tradePnl.js, dashboardStats.js, format.js, constants.js
+│   │   ├── chartColors.js             # usePrefersDark, getChartColors (literal hex, not CSS vars)
+│   │   └── indicators.js              # pure indicator math — see below
 │   ├── components/
-│   │   ├── NavBar.jsx
-│   │   ├── PrivateRoute.jsx
-│   │   └── TradeDrawer.jsx        # slide-in form for new/edit trade
+│   │   ├── NavBar.jsx, PrivateRoute.jsx, TradeDrawer.jsx, TradeSellModal.jsx
+│   │   ├── IdeaDrawer.jsx, StatTile.jsx
+│   │   ├── TradingViewWidget.jsx      # embeds TradingView's public tv.js widget
+│   │   └── TwelveDataChart.jsx        # lightweight-charts render of our own fetched data
 │   ├── pages/
-│   │   ├── Landing.jsx
-│   │   ├── Login.jsx
-│   │   ├── Register.jsx
-│   │   ├── Dashboard.jsx
-│   │   ├── Trades.jsx
-│   │   ├── Ideas.jsx
-│   │   └── Notes.jsx
-│   ├── App.jsx                    # Router + AuthProvider wrapper
-│   └── index.css                  # Tailwind import + @theme tokens
-└── vite.config.js                 # includes @tailwindcss/vite plugin
+│   │   ├── Landing.jsx, Login.jsx, Register.jsx
+│   │   ├── Dashboard.jsx, Trades.jsx, Ideas.jsx, Notes.jsx
+│   │   ├── Settings.jsx               # Anthropic API key management (BYOK)
+│   │   ├── Assistant.jsx              # chat grounded in journal data
+│   │   └── ChartAnalysis.jsx          # chart + indicators + chat grounded in chart data
+│   ├── App.jsx
+│   └── index.css
+└── vite.config.js
 ```
 
 ## Data Schemas
@@ -97,30 +120,151 @@ trading-journal/
 }
 ```
 
+All four containers (`trades`, `ideas`, `notes`, `settings`) live in Cosmos
+DB database `paultrading`, partitioned on `/userId`.
+
 ## AI Assistant (bring-your-own-key)
-`/settings` and `/assistant` pages. Each user pastes their own Anthropic API
-key (console.anthropic.com) in Settings — there's no OAuth/login flow for
-this, it's a manual key generated once per user. The key is stored server-side
-in the `settings` Cosmos container (partition key `/userId`, doc id = userId)
-and is **write-only from the client's perspective**: `GET /api/settings`
-only ever returns `{ hasAnthropicApiKey: boolean }`, never the raw key.
+`/settings` and `/assistant` pages, plus the chat panel on `/chart`. Each
+user pastes their own Anthropic API key (console.anthropic.com) in Settings
+— there's no OAuth/login flow for this, it's a manual key generated once per
+user. The key is stored server-side in the `settings` Cosmos container and
+is **write-only from the client's perspective**: `GET /api/settings` only
+ever returns `{ hasAnthropicApiKey: boolean }`, never the raw key.
 
 `POST /api/assistant` (api/src/functions/assistant.js) verifies the Firebase
 token, reads the caller's own key from Cosmos, and calls the Anthropic
 Messages API (model: `claude-sonnet-5`) server-to-server — the key is never
 sent to or visible from the browser. The request body is
-`{ message, context, history }` where `context` is a summary of the user's
-trades (stats, P&L by instrument, monthly performance, last 20 trades) built
-client-side from `useApi().getTrades()`, and `history` is the last ~10 chat
-messages for continuity. The system prompt embeds that context so the
-assistant can analyze patterns, build projections, and reason through
-scenarios grounded in the user's actual journal data.
+`{ message, context, history }`. `context` is built client-side and is
+either a summary of the user's trades (Assistant page: stats, P&L by
+instrument, monthly performance, last 20 trades) or a chart-analysis payload
+(ChartAnalysis page: symbol, interval, recent Heikin Ashi candles, and
+whichever indicators are currently enabled with their configured settings).
+`history` is the last ~10 chat messages for continuity. The system prompt
+embeds that context so the assistant can analyze patterns, build
+projections, and reason through scenarios grounded in real data — **it does
+not recompute indicator math itself**, it interprets what the app already
+computed.
+
+## Chart Analysis (`/chart`)
+
+Two chart surfaces, both driven by one toolbar (symbol search, interval,
+candle style, indicators dropdown):
+
+- **TradingView widget** (`TradingViewWidget.jsx`) — TradingView's own public
+  embeddable widget (`s3.tradingview.com/tv.js`), used purely for visual
+  viewing/drawing tools. This is a legitimate public embed, not scraping.
+  Its own top toolbar and in-widget symbol/interval change are disabled
+  (`hide_top_toolbar`, `allow_symbol_change: false`) so our toolbar stays the
+  single source of truth — the free widget can't report back to us if the
+  user changed symbol/interval from inside it. Configured indicator periods
+  are pushed in via `studies_overrides` on a best-effort basis (the free
+  widget doesn't officially document these keys, and can't uniquely
+  configure two instances of the same study type).
+- **Twelve Data comparison chart** (`TwelveDataChart.jsx`, `lightweight-charts`)
+  — renders the exact data Claude analyzes, toggled via the "Compare"
+  button. Bars are positioned by sequential index rather than real
+  timestamp so non-trading periods take up no axis space on any timeframe;
+  real dates are recovered for axis labels/tooltips by looking the index
+  back up in the candle array. Double-clicking a line reopens that
+  indicator's settings (only wired up here — the TradingView widget is a
+  cross-origin iframe we can't intercept clicks inside).
+
+Indicators (`src/lib/indicators.js`, pure functions, no side effects): EMA,
+SMA, Bollinger Bands, CCI, RSI, MACD, ATR, Stochastic, and a Heikin Ashi
+transform. Each has user-editable settings in the Indicators dropdown
+(period/fast/slow/signal/etc.) that drive both charts and the Claude
+context — **Parabolic SAR and ADX are not implemented yet** even though
+they're referenced in "Trading Strategy Context" below; add them here if/when
+the strategy needs them.
+
+### Market data — `GET /api/market-data` (Twelve Data, primary source)
+Proxies Twelve Data's `time_series` endpoint with a single app-wide key
+(`TWELVE_DATA_API_KEY`, not per-user). Always requests `timezone=UTC`
+explicitly and parses intraday datetimes with an explicit UTC marker —
+without both of these, daily bars drift by hours against the TradingView
+widget and can land on the wrong calendar date depending on the server's
+own local timezone. Also drops Saturday/Sunday bars for anything except
+crypto (`meta.type === 'Digital Currency'`): Twelve Data returns real,
+non-flat weekend candles for forex/metals that aren't legitimate trading
+days — confirmed by inspecting live responses, not a display artifact.
+
+### Symbol search — `GET /api/symbol-search`
+Proxies Twelve Data's `symbol_search` endpoint so the chart page can
+suggest real instruments (any symbol, unlimited — not a fixed list) as the
+user types, instead of requiring Twelve Data's exact symbol format.
+
+### Planned: Yahoo Finance as a fallback data source
+Twelve Data is the only market-data source today. Yahoo Finance
+(`yahoo-finance2` npm package, no API key) should be added as a **fallback**,
+not a per-instrument hardcoded source — since instruments are unlimited/
+free-text, there's no fixed table to assign "this symbol uses Yahoo" the way
+a small fixed instrument list could. Resolution rule when this is built:
+try Twelve Data first; if it errors, rate-limits, or doesn't recognize the
+symbol, retry via Yahoo Finance and normalize its response into the same
+`{ time, dateLabel, open, high, low, close }` candle shape `marketData.js`
+already returns, so nothing downstream (indicators.js, both charts, the
+Claude context) needs to know which source served a given request.
+
+### Planned: per-user watchlist + hourly snapshot engine
+Today, all indicator computation is **on-demand**: a user opens `/chart`,
+picks a symbol, and everything is computed in that request/response cycle.
+That stays true for any/unlimited instruments — it's not going away.
+
+On top of that, add an **opt-in, per-user watchlist** (nothing tracked by
+default): a new Cosmos container, e.g. `watchlist` (partition key
+`/userId`, one doc per user holding an array of symbols they've chosen to
+track), and a **timer-triggered Azure Function** that runs hourly, iterates
+only over the symbols currently on *any* user's watchlist (dedupe by symbol
+so two users watching XAU/USD only costs one Twelve Data call), computes
+the full indicator set + a signal, and saves the result. This is why the
+watchlist must be opt-in/bounded rather than "every instrument anyone has
+ever typed in" — Twelve Data's free tier is 800 calls/day, 8/min, so hourly
+computation only scales for a deliberately small, user-curated set of
+symbols, never an unbounded one.
+
+Suggested new containers (partition key `/symbol` — shared across users,
+since the underlying market data is the same regardless of who's watching):
+```js
+// snapshots
+{
+  id: string,              // `${symbol}_${isoTimestamp}`
+  symbol: string,
+  timestamp: string,       // ISO, hourly
+  price: number,
+  indicators: {...},       // whatever's enabled — same shape as ChartAnalysis's indicator context
+  signal: string,           // e.g. 'strong_buy' | 'weak_buy' | 'hold' | 'partial_sell' | 'strong_sell'
+  trendPhase: 'beginning' | 'middle' | 'end',
+}
+
+// trends — a completed run, written when direction flips
+{
+  id: string,
+  symbol: string,
+  direction: 'up' | 'down',
+  startTime: string,
+  endTime: string,
+  startPrice: number,
+  endPrice: number,
+  movePct: number,
+}
+```
+Claude's role stays analysis/suggestion only, per the "AI Assistant" section
+above: the assistant reads precomputed snapshots/trends for symbols on the
+user's watchlist and interprets them, it never recomputes the indicator math
+itself. Building this requires porting `src/lib/indicators.js`'s pure
+functions to run server-side in the timer function (they're already pure
+and side-effect-free, so this should be a straight port, not a rewrite) and
+adding a signal/trend-phase matrix, currently unwritten — see "Trading
+Strategy Context" below for the entry/exit rules that matrix should encode.
 
 ## Trading Strategy Context
 - Entry: 100 shares at start of new trend (CCI crosses +100 or -100)
 - Partial sell: 30-40 shares when trend loses momentum (CCI weakening)
 - Re-entry: 100 shares at start of next wave
-- Indicators: CCI (14), EMA 20/50, Parabolic SAR, Heikin Ashi candles
+- Indicators referenced by the strategy: CCI (14), EMA 20/50, Parabolic SAR,
+  Heikin Ashi candles — SAR is not implemented in `indicators.js` yet (see
+  "Chart Analysis" above)
 
 ## Phase 1 — Scaffold & Deploy
 1. Run in terminal (outside Claude Code):
@@ -168,11 +312,9 @@ Centered card layout, email + password inputs, loading state, Firebase error
 message mapping, link between login/register, redirect to /dashboard on success.
 
 ## Phase 3 — Core Features (all data in localStorage)
-
-### Prompt: useStorage hook
-src/hooks/useStorage.js — wraps localStorage with per-user keys (prefix with Firebase uid).
-Expose: getTrades, saveTrade, deleteTrade, getIdeas, saveIdea, deleteIdea,
-getNotes, saveNote. IDs via crypto.randomUUID().
+Superseded by Phase 4 below — localStorage was a stepping stone and the app
+now talks to Azure Functions directly. Left here for history; don't rebuild
+`useStorage.js`.
 
 ### Prompt: Trades page (/trades)
 Table with columns: instrument, direction (green/red badge), entry date, entry price,
@@ -196,12 +338,16 @@ confidence stars, date, status badge. Actions: promote to trade, mark expired, d
 Left sidebar list + right editor panel. Textarea with large font, auto-save after
 1s debounce. Title = first line. New/delete with confirmation.
 
-## Phase 4 — Azure Backend (replace localStorage)
-1. Create Cosmos DB account (serverless) at portal.azure.com
-2. Database: trading-journal, containers: trades/ideas/notes (partition key: /userId)
-3. Copy Primary Connection String from Keys
-4. Create Function App (Node.js 20, Consumption plan)
-5. Add CORS for GitHub Pages URL + localhost:5173
+## Phase 4 — Azure Backend
+1. Cosmos DB account (serverless), database `paultrading`, containers
+   `trades`/`ideas`/`notes`/`settings` (partition key `/userId`)
+2. Azure Function App, **Flex Consumption plan**, Node.js 20
+3. CORS for the GitHub Pages URL + localhost:5173
+
+Flex Consumption is a different deployment model from classic Consumption —
+see `api/README.md` for the gotchas (blob-storage-backed deploys, no
+`FUNCTIONS_WORKER_RUNTIME` app setting, lazy-init Cosmos/Firebase clients to
+avoid a silent module-load-time crash that shows up as "0 functions found").
 
 ### Prompt: Azure Functions API
 Create api/ folder with Azure Functions v4 Node.js project.
@@ -224,3 +370,8 @@ Include loading + error states. No page components should need to change.
 - Mobile-first: test at 390px width
 - Dark theme is default; respect prefers-color-scheme for light
 - Use named exports for components, default export for pages
+- Never hardcode a fixed instrument list — instruments are always free text
+- Indicator functions in `src/lib/indicators.js` must stay pure (no side
+  effects) so they can eventually be ported to run server-side unchanged
+- Commit locally after each change; do not `git push` (which triggers a live
+  deploy) until explicitly told to
