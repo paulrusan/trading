@@ -35,7 +35,7 @@ trading-journal/
 │   │   ├── marketDataFetchers.js      # fetchFromTwelveData/fetchFromYahoo, shared by
 │   │   │                              #   marketData.js (on-demand) and alertsEngine.js (hourly)
 │   │   ├── evaluateAlert.js           # edge-triggered condition evaluation for alerts
-│   │   ├── sendEmail.js               # SendGrid REST call, no SDK
+│   │   ├── sendEmail.js               # Gmail SMTP via nodemailer
 │   │   ├── lib/indicators.js          # server-side port of src/lib/indicators.js
 │   │   └── functions/
 │   │       ├── trades.js, ideas.js, notes.js, alerts.js   # registerCrudRoutes(...)
@@ -267,10 +267,11 @@ per crossing instead of every hour a condition happens to still hold —
 tracked via `lastTriggeredCandleTime` on the alert doc. Indicator alerts
 reuse the exact same math as the chart: `api/src/lib/indicators.js` is a
 straight port of `src/lib/indicators.js` (pure functions, no browser
-dependencies, so no logic changed in the port). Email delivery is
-SendGrid's REST API called directly (`api/src/sendEmail.js`, no SDK), app
-settings `SENDGRID_API_KEY` + `SENDGRID_FROM_EMAIL` (the latter must be a
-verified sender identity in SendGrid).
+dependencies, so no logic changed in the port). Email delivery is Gmail
+SMTP via `nodemailer` (`api/src/sendEmail.js`, `service: 'gmail'`), app
+settings `GMAIL_USER` + `GMAIL_APP_PASSWORD` (a Google App Password, not
+the account password — requires 2-Step Verification enabled on the
+account).
 
 Because a timer trigger is painful to test locally (see `api/README.md`'s
 "Local dev limitation" note — it needs a real `AzureWebJobsStorage`, which

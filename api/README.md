@@ -59,17 +59,18 @@ users watching the same symbol only cost one market-data fetch, evaluates
 each alert's condition (`src/evaluateAlert.js`, using indicator math ported
 to `src/lib/indicators.js` — an exact copy of the frontend's
 `src/lib/indicators.js`, since those functions are pure with no browser
-dependencies), and emails via SendGrid on a **crossing** (edge-triggered:
+dependencies), and emails via Gmail SMTP on a **crossing** (edge-triggered:
 fires once when a condition transitions from not-met to met, using the
 last two candles/indicator points — not every hour it stays true). Which
 bar most recently triggered an alert is tracked via
 `lastTriggeredCandleTime` so the same crossing doesn't re-fire every hour
 until a new bar actually arrives.
 
-**Email**: `src/sendEmail.js` calls SendGrid's REST API directly (no SDK
-dependency). Needs two app settings: `SENDGRID_API_KEY` and
-`SENDGRID_FROM_EMAIL` (must be a sender identity verified in SendGrid —
-Settings → Sender Authentication — or SendGrid will reject the send).
+**Email**: `src/sendEmail.js` sends via Gmail SMTP using `nodemailer`
+(`service: 'gmail'`). Needs two app settings: `GMAIL_USER` (the Gmail
+address) and `GMAIL_APP_PASSWORD` (a 16-character App Password generated at
+myaccount.google.com/apppasswords — this requires 2-Step Verification to be
+enabled on the account; a regular account password will not work).
 
 **Local dev limitation**: the timer trigger's listener requires a real
 `AzureWebJobsStorage` connection (it tracks its own schedule state in a
@@ -95,9 +96,9 @@ appsettings list`.
      accounts → Generate new private key). Keep the `\n` escapes in the
      private key as-is; the code unescapes them at runtime.
    - `TWELVE_DATA_API_KEY` — from twelvedata.com (free tier)
-   - `SENDGRID_API_KEY` — from app.sendgrid.com (Settings → API Keys)
-   - `SENDGRID_FROM_EMAIL` — a sender email verified in SendGrid (Settings →
-     Sender Authentication); sends fail otherwise
+   - `GMAIL_USER` — the Gmail address alerts are sent from
+   - `GMAIL_APP_PASSWORD` — a Google App Password (myaccount.google.com/apppasswords),
+     not the account's regular password; requires 2-Step Verification enabled
 4. `npm start` (runs `func start`) — API available at `http://localhost:7071/api/...`
 
 Do **not** set `FUNCTIONS_WORKER_RUNTIME` — Flex Consumption manages the
