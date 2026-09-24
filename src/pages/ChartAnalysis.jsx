@@ -125,16 +125,22 @@ const DEFAULT_INDICATOR_STATE = Object.fromEntries(
 // symbols (unknown futures roots, indices) return null and the compare panel hides.
 const YAHOO_FUTURES_ROOT_TO_TV = {
   GC: 'COMEX:GC1!',
+  MGC: 'COMEX_MINI:MGC1!', // Micro Gold
   SI: 'COMEX:SI1!',
+  SIL: 'COMEX_MINI:SIL1!', // Micro Silver
   CL: 'NYMEX:CL1!',
+  MCL: 'NYMEX:MCL1!', // Micro Crude Oil
   NG: 'NYMEX:NG1!',
   HG: 'COMEX:HG1!',
   ZC: 'CBOT:ZC1!',
   ZS: 'CBOT:ZS1!',
   ZW: 'CBOT:ZW1!',
   ES: 'CME:ES1!',
+  MES: 'CME_MINI:MES1!', // Micro E-mini S&P 500
   NQ: 'CME:NQ1!',
+  MNQ: 'CME_MINI:MNQ1!', // Micro E-mini Nasdaq-100
   YM: 'CBOT:YM1!',
+  MYM: 'CBOT_MINI:MYM1!', // Micro E-mini Dow
 }
 const YAHOO_INDEX_TO_TV = {
   '^GSPC': 'SP:SPX',
