@@ -17,15 +17,30 @@ read or write another user's data.
   `settings` and calls the Anthropic Messages API server-to-server with a
   context payload (journal data, chart data, or both) the frontend builds
   and sends. The key never reaches the browser.
-- `GET /api/market-data?symbol=XAU/USD&interval=1day&outputsize=200` —
-  proxies Twelve Data's `time_series` endpoint using a single app-wide key
-  (not per-user), returns `{ symbol, interval, candles }` with `time` as a
-  UNIX timestamp (seconds) for direct use with `lightweight-charts`.
-- `GET /api/symbol-search?query=gold` — proxies Twelve Data's
-  `symbol_search` endpoint (same app-wide key), returns
+- `GET /api/market-data?symbol=XAU/USD&interval=1day&outputsize=200&source=twelvedata` —
+  fetches OHLC candles from either Twelve Data (`time_series`, app-wide key)
+  or Yahoo Finance (`yahoo-finance2`, no key needed), selected via
+  `source=twelvedata|yahoo` (defaults to `twelvedata`). Returns
+  `{ symbol, interval, source, candles }` with `time` as a UNIX timestamp
+  (seconds) for direct use with `lightweight-charts`. Both providers'
+  responses are normalized to the same candle shape and have weekend bars
+  dropped for anything except crypto (Twelve Data returns real, non-flat
+  Saturday/Sunday candles for forex/metals — confirmed by inspecting live
+  responses, not just a timezone artifact). Yahoo has no native 4-hour
+  granularity, so `interval=4h` is fetched hourly and bucketed into 4-hour
+  bars server-side. **Twelve Data and Yahoo use different symbol formats**
+  for the same instrument (e.g. `XAU/USD` vs `GC=F`) — always search with
+  the matching `source` to get a symbol that vendor will actually resolve.
+- `GET /api/symbol-search?query=gold&source=twelvedata` — proxies either
+  Twelve Data's `symbol_search` or Yahoo Finance's `search()`, selected via
+  the same `source` param, returns
   `{ results: [{ symbol, name, exchange, type, country }] }` so the chart
-  page's symbol field can suggest instruments as the user types instead of
-  requiring an exact Twelve Data symbol format.
+  page's symbol field can suggest real instruments as the user types
+  instead of requiring the exact symbol format for whichever provider is
+  selected. Yahoo has no separate silver/gold spot symbols the way Twelve
+  Data does (`XAG/USD`/`XAU/USD`) — it only has futures (`SI=F`/`GC=F`) and
+  ETFs (`SLV`/`GLD`), which is one reason Yahoo exists as an option: it's
+  useful for instruments not included in a given Twelve Data plan.
 
 ## Local development
 

@@ -21,6 +21,10 @@ const INTERVALS = [
   { value: '1day', label: 'Daily' },
   { value: '1week', label: 'Weekly' },
 ]
+const DATA_SOURCES = [
+  { value: 'twelvedata', label: 'Twelve Data' },
+  { value: 'yahoo', label: 'Yahoo' },
+]
 const OUTPUT_SIZE_BY_INTERVAL = {
   '1h': 5000,
   '4h': 5000,
@@ -172,6 +176,7 @@ export default function ChartAnalysis() {
   const [symbolResults, setSymbolResults] = useState([])
   const [symbolSearchOpen, setSymbolSearchOpen] = useState(false)
   const [symbolSearchLoading, setSymbolSearchLoading] = useState(false)
+  const [dataSource, setDataSource] = useState('twelvedata')
   const [interval, setInterval_] = useState('1day')
   const [activeSymbol, setActiveSymbol] = useState(null)
   const [candles, setCandles] = useState([])
@@ -231,7 +236,7 @@ export default function ChartAnalysis() {
     setSymbolSearchLoading(true)
     const timer = setTimeout(async () => {
       try {
-        const data = await api.searchSymbols(query)
+        const data = await api.searchSymbols(query, dataSource)
         setSymbolResults(data.results ?? [])
       } catch {
         setSymbolResults([])
@@ -241,7 +246,7 @@ export default function ChartAnalysis() {
     }, 300)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbolInput])
+  }, [symbolInput, dataSource])
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -279,16 +284,17 @@ export default function ChartAnalysis() {
     setOpenSettingsKey(key)
   }, [])
 
-  const loadChart = async (e, overrideInterval, overrideSymbol) => {
+  const loadChart = async (e, overrideInterval, overrideSymbol, overrideSource) => {
     e?.preventDefault()
     const sym = (overrideSymbol ?? symbolInput).trim()
     const int = overrideInterval ?? interval
+    const src = overrideSource ?? dataSource
     if (!sym) return
     setLoading(true)
     setError('')
     setMessages([])
     try {
-      const data = await api.getMarketData(sym, int, OUTPUT_SIZE_BY_INTERVAL[int] ?? 500)
+      const data = await api.getMarketData(sym, int, OUTPUT_SIZE_BY_INTERVAL[int] ?? 500, src)
       setCandles(data.candles)
       setActiveSymbol(data.symbol)
     } catch (err) {
@@ -308,6 +314,16 @@ export default function ChartAnalysis() {
     setSymbolResults([])
     setSymbolSearchOpen(false)
     loadChart(undefined, undefined, symbol)
+  }
+
+  const handleDataSourceChange = (value) => {
+    if (value === dataSource) return
+    setDataSource(value)
+    setSymbolInput('')
+    setSymbolResults([])
+    setActiveSymbol(null)
+    setCandles([])
+    setShowCompare(false)
   }
 
   const studies = [
@@ -374,6 +390,7 @@ export default function ChartAnalysis() {
       const context = {
         type: 'chart_analysis',
         symbol: activeSymbol,
+        dataSource,
         interval,
         candleType,
         latestPrice: candles[candles.length - 1]?.close,
@@ -440,6 +457,21 @@ export default function ChartAnalysis() {
                 ))}
             </div>
           )}
+        </div>
+
+        <div className="flex rounded border border-border p-0.5">
+          {DATA_SOURCES.map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              onClick={() => handleDataSourceChange(s.value)}
+              className={`rounded px-2 py-1 text-xs ${
+                dataSource === s.value ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
         </div>
 
         <div className="flex rounded border border-border p-0.5">
@@ -576,52 +608,77 @@ export default function ChartAnalysis() {
           </svg>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setShowCompare((v) => !v)}
-          disabled={candles.length === 0}
-          className={`rounded border border-border px-2 py-1 text-xs disabled:opacity-50 ${
-            showCompare ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
-          }`}
-        >
-          Compare
-        </button>
+        {dataSource === 'twelvedata' && (
+          <button
+            type="button"
+            onClick={() => setShowCompare((v) => !v)}
+            disabled={candles.length === 0}
+            className={`rounded border border-border px-2 py-1 text-xs disabled:opacity-50 ${
+              showCompare ? 'bg-accent text-white' : 'text-text-muted hover:text-text'
+            }`}
+          >
+            Compare
+          </button>
+        )}
 
         {loading && <span className="text-xs text-text-muted">Loading…</span>}
       </div>
 
-      <div className="mb-6">
-        {activeSymbol ? (
-          <TradingViewWidget
-            symbol={toTradingViewSymbol(activeSymbol)}
-            interval={TV_INTERVAL[interval] ?? 'D'}
-            style={TV_STYLE[candleType] ?? 1}
-            studies={studies}
-            studiesOverrides={studiesOverrides}
-            theme={isDark ? 'dark' : 'light'}
-            height={showCompare ? 400 : 560}
-          />
-        ) : (
-          <div className="flex h-[560px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-text-muted">
-            {loading ? 'Loading…' : 'Enter a symbol above and click Load chart.'}
+      {dataSource === 'twelvedata' ? (
+        <>
+          <div className="mb-6">
+            {activeSymbol ? (
+              <TradingViewWidget
+                symbol={toTradingViewSymbol(activeSymbol)}
+                interval={TV_INTERVAL[interval] ?? 'D'}
+                style={TV_STYLE[candleType] ?? 1}
+                studies={studies}
+                studiesOverrides={studiesOverrides}
+                theme={isDark ? 'dark' : 'light'}
+                height={showCompare ? 400 : 560}
+              />
+            ) : (
+              <div className="flex h-[560px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-text-muted">
+                {loading ? 'Loading…' : 'Enter a symbol above and click Load chart.'}
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {showCompare && candles.length > 0 && (
+          {showCompare && candles.length > 0 && (
+            <div className="mb-6">
+              <p className="mb-2 text-xs text-text-muted">
+                Twelve Data — the source Claude actually analyzes. Compare against the TradingView
+                chart above to check they agree.
+              </p>
+              <TwelveDataChart
+                candles={candles}
+                candleType={candleType}
+                indicators={enabledIndicators}
+                interval={interval}
+                height={400}
+                onIndicatorDoubleClick={handleIndicatorDoubleClick}
+              />
+            </div>
+          )}
+        </>
+      ) : (
         <div className="mb-6">
-          <p className="mb-2 text-xs text-text-muted">
-            Twelve Data — the source Claude actually analyzes. Compare against the TradingView chart
-            above to check they agree.
-          </p>
-          <TwelveDataChart
-            candles={candles}
-            candleType={candleType}
-            indicators={enabledIndicators}
-            interval={interval}
-            height={400}
-            onIndicatorDoubleClick={handleIndicatorDoubleClick}
-          />
+          {candles.length > 0 ? (
+            <TwelveDataChart
+              candles={candles}
+              candleType={candleType}
+              indicators={enabledIndicators}
+              interval={interval}
+              height={560}
+              onIndicatorDoubleClick={handleIndicatorDoubleClick}
+            />
+          ) : (
+            <div className="flex h-[560px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-text-muted">
+              {loading
+                ? 'Loading…'
+                : 'Enter a symbol above and click Load chart. The TradingView view is unavailable for Yahoo symbols, since they use a different symbol format.'}
+            </div>
+          )}
         </div>
       )}
 

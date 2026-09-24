@@ -80,16 +80,20 @@ export function useApi() {
   )
 
   const getMarketData = useCallback(
-    (symbol, interval = '1day', outputsize = 5000) =>
+    (symbol, interval = '1day', outputsize = 5000, source = 'twelvedata') =>
       call(
-        `/market-data?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&outputsize=${outputsize}`,
+        `/market-data?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&outputsize=${outputsize}&source=${encodeURIComponent(source)}`,
         { method: 'GET' },
       ),
     [call],
   )
 
   const searchSymbols = useCallback(
-    (query) => call(`/symbol-search?query=${encodeURIComponent(query)}`, { method: 'GET' }),
+    (query, source = 'twelvedata') =>
+      call(
+        `/symbol-search?query=${encodeURIComponent(query)}&source=${encodeURIComponent(source)}`,
+        { method: 'GET' },
+      ),
     [call],
   )
 

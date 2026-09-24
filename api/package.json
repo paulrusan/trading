@@ -10,6 +10,7 @@
   "dependencies": {
     "@azure/cosmos": "^4.2.0",
     "@azure/functions": "^4.5.1",
-    "firebase-admin": "^13.0.2"
+    "firebase-admin": "^13.0.2",
+    "yahoo-finance2": "^4.0.2"
   }
 }
