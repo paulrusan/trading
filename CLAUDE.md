@@ -9,8 +9,9 @@ public embeddable widget + `lightweight-charts` (market charting), React
 Router, Firebase Auth.
 Hosting: GitHub Pages (gh-pages branch, auto-deploy via GitHub Actions).
 Backend: Azure Functions (Flex Consumption) + Cosmos DB, deployed via OIDC.
-Market data: Twelve Data API (`time_series` + `symbol_search`), proxied
-through our own Function App so the API key never reaches the browser.
+Market data: Twelve Data API or Yahoo Finance (`yahoo-finance2`),
+user-selectable per chart, proxied through our own Function App so the
+Twelve Data API key never reaches the browser (Yahoo needs no key).
 AI: Anthropic API, bring-your-own-key per user (see "AI Assistant" below).
 
 ## Design System
@@ -35,8 +36,8 @@ trading-journal/
 │   │       ├── trades.js, ideas.js, notes.js   # registerCrudRoutes(...)
 │   │       ├── settings.js            # per-user settings (Anthropic key)
 │   │       ├── assistant.js           # POST /api/assistant — Claude, server-side key
-│   │       ├── marketData.js          # GET /api/market-data — Twelve Data time_series proxy
-│   │       └── symbolSearch.js        # GET /api/symbol-search — Twelve Data symbol_search proxy
+│   │       ├── marketData.js          # GET /api/market-data — Twelve Data or Yahoo, ?source=
+│   │       └── symbolSearch.js        # GET /api/symbol-search — same source toggle
 │   ├── local.settings.json(.example)
 │   └── README.md                      # endpoints, local dev, Flex Consumption deploy notes
 ├── src/
@@ -178,33 +179,43 @@ context — **Parabolic SAR and ADX are not implemented yet** even though
 they're referenced in "Trading Strategy Context" below; add them here if/when
 the strategy needs them.
 
-### Market data — `GET /api/market-data` (Twelve Data, primary source)
-Proxies Twelve Data's `time_series` endpoint with a single app-wide key
-(`TWELVE_DATA_API_KEY`, not per-user). Always requests `timezone=UTC`
-explicitly and parses intraday datetimes with an explicit UTC marker —
-without both of these, daily bars drift by hours against the TradingView
-widget and can land on the wrong calendar date depending on the server's
-own local timezone. Also drops Saturday/Sunday bars for anything except
-crypto (`meta.type === 'Digital Currency'`): Twelve Data returns real,
-non-flat weekend candles for forex/metals that aren't legitimate trading
-days — confirmed by inspecting live responses, not a display artifact.
+### Market data — `GET /api/market-data` (Twelve Data or Yahoo Finance, user-selectable)
+`marketData.js` fetches from either provider based on a `source` query
+param (`twelvedata` | `yahoo`, defaults to `twelvedata`) — a toggle in the
+ChartAnalysis toolbar, not a silent fallback. **The two providers use
+different symbol formats for the same instrument** (`XAU/USD` vs `GC=F`),
+so switching source clears the loaded symbol rather than trying to reuse
+it. Both are normalized to the same
+`{ time, dateLabel, open, high, low, close }` candle shape before
+returning, so nothing downstream (indicators.js, both charts, the Claude
+context) needs to know which source served a given request.
+
+- **Twelve Data** (`TWELVE_DATA_API_KEY`, app-wide, not per-user): always
+  requests `timezone=UTC` explicitly and parses intraday datetimes with an
+  explicit UTC marker — without both of these, daily bars drift by hours
+  against the TradingView widget and can land on the wrong calendar date
+  depending on the server's own local timezone.
+- **Yahoo Finance** (`yahoo-finance2` npm package, no API key needed):
+  useful for instruments a given Twelve Data plan doesn't include (e.g.
+  Silver isn't on the current plan; Yahoo has it as `SI=F`). Confirmed
+  against live data before building this: Yahoo has no native 4-hour
+  granularity, so `interval=4h` fetches hourly candles and buckets them
+  into 4-hour bars server-side (`aggregateHourlyTo4h`).
+
+Both sources drop Saturday/Sunday bars for anything except crypto — Twelve
+Data returns real, non-flat weekend candles for forex/metals that aren't
+legitimate trading days (confirmed by inspecting live responses, not a
+display artifact); Yahoo doesn't have this problem on its own but gets the
+same filter for consistency. Crypto is detected per-provider:
+`meta.type === 'Digital Currency'` (Twelve Data) or
+`meta.instrumentType === 'CRYPTOCURRENCY'` (Yahoo).
 
 ### Symbol search — `GET /api/symbol-search`
-Proxies Twelve Data's `symbol_search` endpoint so the chart page can
-suggest real instruments (any symbol, unlimited — not a fixed list) as the
-user types, instead of requiring Twelve Data's exact symbol format.
-
-### Planned: Yahoo Finance as a fallback data source
-Twelve Data is the only market-data source today. Yahoo Finance
-(`yahoo-finance2` npm package, no API key) should be added as a **fallback**,
-not a per-instrument hardcoded source — since instruments are unlimited/
-free-text, there's no fixed table to assign "this symbol uses Yahoo" the way
-a small fixed instrument list could. Resolution rule when this is built:
-try Twelve Data first; if it errors, rate-limits, or doesn't recognize the
-symbol, retry via Yahoo Finance and normalize its response into the same
-`{ time, dateLabel, open, high, low, close }` candle shape `marketData.js`
-already returns, so nothing downstream (indicators.js, both charts, the
-Claude context) needs to know which source served a given request.
+Same `source` param as market-data. Proxies Twelve Data's `symbol_search`
+or Yahoo's `.search()` so the chart page can suggest real instruments (any
+symbol, unlimited — not a fixed list) as the user types, scoped to
+whichever provider is currently selected, instead of requiring that
+provider's exact symbol format.
 
 ### Planned: per-user watchlist + hourly snapshot engine
 Today, all indicator computation is **on-demand**: a user opens `/chart`,
