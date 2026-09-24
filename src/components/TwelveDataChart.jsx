@@ -1,4 +1,11 @@
-import { CandlestickSeries, HistogramSeries, LineSeries, LineStyle, createChart } from 'lightweight-charts'
+import {
+  CandlestickSeries,
+  HistogramSeries,
+  LineSeries,
+  LineStyle,
+  createChart,
+  createSeriesMarkers,
+} from 'lightweight-charts'
 import { useEffect, useRef } from 'react'
 import { getChartColors, usePrefersDark } from '../lib/chartColors'
 import { toHeikinAshi } from '../lib/indicators'
@@ -42,6 +49,7 @@ export function TwelveDataChart({
   interval,
   height = 400,
   onIndicatorDoubleClick,
+  markers,
 }) {
   const isDark = usePrefersDark()
   const colors = getChartColors(isDark)
@@ -107,6 +115,38 @@ export function TwelveDataChart({
         0,
       )
       candleSeries.setData(displayCandles)
+
+      // Marker times are real UNIX seconds (e.g. a trend's startTime) — mapped to the
+      // candle's index like everything else here, falling back to the nearest candle
+      // if there's no exact match (a trend start time is always set from an actual
+      // candle in computeSnapshot.js, so this should be rare in practice).
+      if (markers?.length) {
+        const converted = []
+        for (const m of markers) {
+          let idx = realTimeToIndex.get(m.time)
+          if (idx === undefined) {
+            let nearestTime = null
+            let nearestDiff = Infinity
+            for (const c of candles) {
+              const diff = Math.abs(c.time - m.time)
+              if (diff < nearestDiff) {
+                nearestDiff = diff
+                nearestTime = c.time
+              }
+            }
+            idx = nearestTime !== null ? realTimeToIndex.get(nearestTime) : undefined
+          }
+          if (idx === undefined) continue
+          converted.push({
+            time: idx,
+            position: m.position ?? 'belowBar',
+            color: m.color,
+            shape: m.shape ?? 'arrowUp',
+            text: m.text,
+          })
+        }
+        if (converted.length > 0) createSeriesMarkers(candleSeries, converted)
+      }
 
       // Tracks which indicator key each overlay/oscillator line belongs to, so a
       // double-click near a line can reopen that indicator's settings.
@@ -228,7 +268,7 @@ export function TwelveDataChart({
       resizeObserver.disconnect()
       chart.remove()
     }
-  }, [colors, candles, candleType, indicators, interval, height, onIndicatorDoubleClick])
+  }, [colors, candles, candleType, indicators, interval, height, onIndicatorDoubleClick, markers])
 
   return <div ref={containerRef} style={{ height }} className="overflow-hidden rounded-lg border border-border" />
 }

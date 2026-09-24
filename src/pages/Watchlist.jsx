@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { SymbolSearchInput } from '../components/SymbolSearchInput'
 import { useApi } from '../hooks/useApi'
+import { SIGNAL_LABEL, SIGNAL_STYLE } from '../lib/signalLabels'
 
 const DATA_SOURCES = [
   { value: 'twelvedata', label: 'Twelve Data' },
@@ -13,22 +15,16 @@ const INTERVALS = [
   { value: '1week', label: 'Weekly' },
 ]
 
-const SIGNAL_STYLE = {
-  strong_buy: 'text-profit',
-  weak_buy: 'text-profit',
-  hold: 'text-text-muted',
-  partial_sell: 'text-loss',
-  strong_sell: 'text-loss',
-}
-const SIGNAL_LABEL = {
-  strong_buy: 'Strong buy',
-  weak_buy: 'Weak buy (re-entry)',
-  hold: 'Hold',
-  partial_sell: 'Partial sell',
-  strong_sell: 'Strong sell',
-}
-
 const EMPTY_FORM = { symbol: '', dataSource: 'twelvedata', interval: '1day' }
+
+function snapshotDetailUrl(entry) {
+  const params = new URLSearchParams({
+    symbol: entry.symbol,
+    dataSource: entry.dataSource,
+    interval: entry.interval,
+  })
+  return `/snapshot?${params.toString()}`
+}
 
 export default function Watchlist() {
   const api = useApi()
@@ -224,13 +220,23 @@ export default function Watchlist() {
                     <p className="text-xs text-text-muted">No snapshot yet — runs on the next hourly check.</p>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(entry.id)}
-                  className="rounded border border-border px-2 py-1 text-xs text-loss hover:bg-bg"
-                >
-                  Remove
-                </button>
+                <div className="flex items-center gap-2">
+                  <Link
+                    to={snapshotDetailUrl(entry)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded border border-border px-2 py-1 text-xs text-text-muted hover:text-text"
+                  >
+                    View
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(entry.id)}
+                    className="rounded border border-border px-2 py-1 text-xs text-loss hover:bg-bg"
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
             )
           })}

@@ -12,6 +12,7 @@ import Login from './pages/Login'
 import Notes from './pages/Notes'
 import Register from './pages/Register'
 import Settings from './pages/Settings'
+import SnapshotDetail from './pages/SnapshotDetail'
 import Trades from './pages/Trades'
 import Watchlist from './pages/Watchlist'
 
@@ -93,6 +94,14 @@ function App() {
             element={
               <PrivateRoute>
                 <Watchlist />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/snapshot"
+            element={
+              <PrivateRoute>
+                <SnapshotDetail />
               </PrivateRoute>
             }
           />
