@@ -71,6 +71,7 @@ export async function runAlertsCheck(log = () => {}) {
       if (!result || !result.triggered) continue
       if (result.candleTime === alert.lastTriggeredCandleTime) continue // already alerted for this bar
 
+      const triggeredAt = new Date().toISOString()
       try {
         await sendAlertEmail({
           to: alert.email,
@@ -79,8 +80,11 @@ export async function runAlertsCheck(log = () => {}) {
         })
         await container.items.upsert({
           ...alert,
-          lastTriggeredAt: new Date().toISOString(),
+          lastTriggeredAt: triggeredAt,
           lastTriggeredCandleTime: result.candleTime,
+          // Last 10 firings, for the "show me on the chart when this fired" view — not
+          // meant as a full audit log, just enough for a quick visual sanity check.
+          triggerHistory: [...(alert.triggerHistory ?? []), { candleTime: result.candleTime, triggeredAt }].slice(-10),
         })
         triggered++
       } catch (err) {

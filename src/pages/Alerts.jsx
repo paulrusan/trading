@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { SymbolSearchInput } from '../components/SymbolSearchInput'
 import { useAuth } from '../context/AuthContext'
 import { useApi } from '../hooks/useApi'
@@ -107,6 +108,16 @@ function describeCondition(condition, alertInterval) {
           })()
   const interval = condition.interval ?? alertInterval
   return interval !== alertInterval ? `${interval} ${base}` : base
+}
+
+function alertChartUrl(alert) {
+  const params = new URLSearchParams({
+    alertId: alert.id,
+    symbol: alert.symbol,
+    dataSource: alert.dataSource,
+    interval: alert.interval,
+  })
+  return `/alert-chart?${params.toString()}`
 }
 
 function describeAlert(alert) {
@@ -529,6 +540,14 @@ export default function Alerts() {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                <Link
+                  to={alertChartUrl(alert)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded border border-border px-2 py-1 text-xs text-text-muted hover:text-text"
+                >
+                  View chart
+                </Link>
                 <button
                   type="button"
                   onClick={() => toggleActive(alert)}

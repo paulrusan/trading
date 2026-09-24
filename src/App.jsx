@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { NavBar } from './components/NavBar'
 import { PrivateRoute } from './components/PrivateRoute'
 import { AuthProvider } from './context/AuthContext'
+import AlertChart from './pages/AlertChart'
 import Alerts from './pages/Alerts'
 import Assistant from './pages/Assistant'
 import ChartAnalysis from './pages/ChartAnalysis'
@@ -86,6 +87,14 @@ function App() {
             element={
               <PrivateRoute>
                 <Alerts />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/alert-chart"
+            element={
+              <PrivateRoute>
+                <AlertChart />
               </PrivateRoute>
             }
           />
