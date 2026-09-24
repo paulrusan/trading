@@ -58,6 +58,10 @@ read or write another user's data.
 - `POST /api/snapshots/run` — manually runs the same snapshot logic the
   hourly timer runs, for testing without waiting for the clock. Returns
   `{ watchedActive, groups, updated, trendsClosed, failed }`.
+- `POST /api/snapshots/backfill` (body `{ symbol, dataSource, interval }`) —
+  reconstructs signal/trend history from candles already available, instead
+  of only ever accumulating forward from whenever a symbol was added to the
+  watchlist. Returns `{ candles, events, trends }`. See "Watchlist" below.
 - `GET /api/snapshots` / `GET /api/trends`
   (`?symbol=&dataSource=&interval=&limit=`) — read-only history for a
   symbol, oldest-first. Unlike the CRUD resources above these aren't scoped
@@ -124,6 +128,21 @@ as `/api/alerts/run` — and `GET /api/snapshots`/`GET /api/trends` for
 reading the history back (used by the Watchlist page and, when the
 currently-loaded chart symbol has history, folded into the Claude chat
 context as `context.watchlistHistory`).
+
+**Backfill**: the engine above only ever moves forward — it has no memory
+of anything before whenever a symbol was first watched. `POST
+/api/snapshots/backfill` (`{ symbol, dataSource, interval }`) fixes that by
+replaying the exact same signal logic (`backfillTrendHistory` in
+`src/computeSnapshot.js`, sharing a `stepSignal` core with the live
+`computeSnapshotUpdate` so the two can't drift apart) across the *whole*
+candle history already available in one pass, reconstructing every past
+signal event and completed trend as if the engine had been running the
+entire time. It only writes bars where something happened (a non-`hold`
+signal) plus the final/current bar, not every single hourly bar — a few
+thousand near-identical `hold` writes for one on-demand call would be slow
+and wasteful. `SnapshotDetail.jsx` (the `/snapshot` page) triggers this
+automatically the first time it loads a symbol with no trend history yet,
+and also exposes a manual "Backfill history" button.
 
 ## Local development
 

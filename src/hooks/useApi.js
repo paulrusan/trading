@@ -115,6 +115,11 @@ export function useApi() {
     [call],
   )
   const runSnapshotsCheck = useCallback(() => call('/snapshots/run', { method: 'POST' }), [call])
+  const runSnapshotBackfill = useCallback(
+    (symbol, dataSource, interval) =>
+      call('/snapshots/backfill', { method: 'POST', body: JSON.stringify({ symbol, dataSource, interval }) }),
+    [call],
+  )
 
   const getSnapshots = useCallback(
     (symbol, dataSource = 'twelvedata', interval = '1day', limit = 50) =>
@@ -159,6 +164,7 @@ export function useApi() {
     saveWatchlistEntry,
     deleteWatchlistEntry,
     runSnapshotsCheck,
+    runSnapshotBackfill,
     getSnapshots,
     getTrends,
   }

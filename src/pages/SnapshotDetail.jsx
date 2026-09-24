@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { TwelveDataChart } from '../components/TwelveDataChart'
 import { useApi } from '../hooks/useApi'
@@ -35,7 +35,9 @@ export default function SnapshotDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [running, setRunning] = useState(false)
+  const [backfilling, setBackfilling] = useState(false)
   const [runStatus, setRunStatus] = useState('')
+  const autoBackfillTriedRef = useRef(false)
 
   const loadAll = () => {
     if (!symbol) return
@@ -56,9 +58,39 @@ export default function SnapshotDetail() {
   }
 
   useEffect(() => {
+    autoBackfillTriedRef.current = false
     loadAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, dataSource, interval])
+
+  const handleBackfill = async (silent = false) => {
+    setBackfilling(true)
+    if (!silent) setRunStatus('')
+    try {
+      const summary = await api.runSnapshotBackfill(symbol, dataSource, interval)
+      setRunStatus(
+        `Backfilled from existing history: ${summary.candles} candle(s), ${summary.events} signal event(s), ${summary.trends} completed trend(s) found.`,
+      )
+      loadAll()
+    } catch (err) {
+      setRunStatus(err.message)
+    } finally {
+      setBackfilling(false)
+    }
+  }
+
+  // Auto-backfill once per symbol/source/interval, only when there's essentially no
+  // history yet — a freshly-watched symbol has only ever accumulated forward from
+  // whenever it was added, so without this it would sit empty until enough hourly runs
+  // pass, even though the candle history needed to reconstruct past trends already exists.
+  useEffect(() => {
+    if (loading || autoBackfillTriedRef.current) return
+    if (candles.length > 0 && trends.length === 0 && snapshots.length <= 1) {
+      autoBackfillTriedRef.current = true
+      handleBackfill(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, candles, trends, snapshots])
 
   const handleRunNow = async () => {
     setRunning(true)
@@ -134,14 +166,25 @@ export default function SnapshotDetail() {
             {dataSource === 'yahoo' ? 'Yahoo' : 'Twelve Data'} · {interval}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleRunNow}
-          disabled={running}
-          className="rounded-md border border-border px-3 py-1.5 text-sm text-text-muted hover:text-text disabled:opacity-50"
-        >
-          {running ? 'Checking…' : 'Check now'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleBackfill(false)}
+            disabled={backfilling}
+            title="Reconstruct signal/trend history from the candles already on hand"
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-text-muted hover:text-text disabled:opacity-50"
+          >
+            {backfilling ? 'Backfilling…' : 'Backfill history'}
+          </button>
+          <button
+            type="button"
+            onClick={handleRunNow}
+            disabled={running}
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-text-muted hover:text-text disabled:opacity-50"
+          >
+            {running ? 'Checking…' : 'Check now'}
+          </button>
+        </div>
       </div>
 
       {runStatus && <p className="mb-3 text-xs text-text-muted">{runStatus}</p>}

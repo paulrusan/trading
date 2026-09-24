@@ -56,12 +56,14 @@ trading-journal/
 │   ├── lib/
 │   │   ├── tradePnl.js, dashboardStats.js, format.js, constants.js
 │   │   ├── chartColors.js             # usePrefersDark, getChartColors (literal hex, not CSS vars)
-│   │   └── indicators.js              # pure indicator math — see below
+│   │   ├── indicators.js              # pure indicator math — see below
+│   │   └── signalLabels.js            # SIGNAL_LABEL/SIGNAL_STYLE/PHASE_LABEL/describeCondition
 │   ├── components/
 │   │   ├── NavBar.jsx, PrivateRoute.jsx, TradeDrawer.jsx, TradeSellModal.jsx
 │   │   ├── IdeaDrawer.jsx, StatTile.jsx
 │   │   ├── TradingViewWidget.jsx      # embeds TradingView's public tv.js widget
-│   │   └── TwelveDataChart.jsx        # lightweight-charts render of our own fetched data
+│   │   ├── TwelveDataChart.jsx        # lightweight-charts render of our own fetched data
+│   │   └── SymbolSearchInput.jsx      # debounced symbol search/autocomplete (Watchlist form)
 │   ├── pages/
 │   │   ├── Landing.jsx, Login.jsx, Register.jsx
 │   │   ├── Dashboard.jsx, Trades.jsx, Ideas.jsx, Notes.jsx
@@ -69,7 +71,8 @@ trading-journal/
 │   │   ├── Assistant.jsx              # chat grounded in journal data
 │   │   ├── ChartAnalysis.jsx          # chart + indicators + chat grounded in chart data
 │   │   ├── Alerts.jsx                 # create/manage price & indicator email alerts
-│   │   └── Watchlist.jsx              # opt-in hourly snapshot list + latest signal per symbol
+│   │   ├── Watchlist.jsx              # opt-in hourly snapshot list + latest signal per symbol
+│   │   └── SnapshotDetail.jsx         # /snapshot — chart + trend history for one symbol
 │   ├── App.jsx
 │   └── index.css
 └── vite.config.js
@@ -411,6 +414,43 @@ the Claude chat context in `ChartAnalysis.jsx` as `context.watchlistHistory
 = { snapshots, trends }`. Per `api/src/functions/assistant.js`'s system
 prompt, Claude is told to interpret this precomputed history, not recompute
 its own signal from the raw indicator values.
+
+**Backfill**: the engine above only ever accumulates forward from whenever
+a symbol was first watched — on its own it has no memory of anything
+earlier, even though the candle history needed to reconstruct past trends
+is already available. `POST /api/snapshots/backfill`
+(`api/src/functions/snapshotsEngine.js`'s `runBackfill`) fixes that:
+`computeSnapshot.js` was refactored so both the live hourly step
+(`computeSnapshotUpdate`) and a new bulk replay (`backfillTrendHistory`)
+share one `stepSignal` core, and the bulk version runs that exact same
+logic across the whole candle history in one pass — verified to produce
+identical results to running the live step incrementally bar-by-bar
+before shipping. `/snapshot` (`SnapshotDetail.jsx`) triggers this
+automatically the first time it loads a symbol with no trend history yet,
+plus a manual "Backfill history" button. It only writes bars where
+something happened (a non-`hold` signal) plus the current bar, not every
+historical hourly bar. **Empirically, on live USD/CAD 1h data this found
+241 events / 58 completed trends across ~1424 candles (~59 days)** — CCI
+±100 crossings are fairly frequent on an hourly timeframe, so "trend" here
+means any CCI-confirmed swing, not necessarily what looks like a single
+major move on the chart. Worth keeping in mind if trend counts look noisy
+on shorter intervals.
+
+**Snapshot detail page** (`/snapshot?symbol=&dataSource=&interval=`,
+`SnapshotDetail.jsx`): opens in a new tab from a "View" link on each
+Watchlist row. Shows the price chart with markers at every trend's start
+(closed ones from `trends`, plus the current still-open one from the
+latest snapshot's `trendStartTime`, added via a `markers` prop on
+`TwelveDataChart.jsx` — `createSeriesMarkers` from `lightweight-charts`,
+mapped through the same real-time -> index lookup as everything else in
+that component), current condition (signal/regime/phase, CCI, EMA 20/50,
+how long the trend's been running, % move since it started), an estimated
+remaining duration (average of the last 3 completed trends vs. elapsed —
+explicitly framed as a rough average of past behavior, not a prediction),
+and a table of the previous 3 trends. `src/lib/signalLabels.js` holds the
+shared signal/phase vocabulary (`SIGNAL_LABEL`, `SIGNAL_STYLE`,
+`PHASE_LABEL`, `describeCondition`) so this page and the Watchlist list
+view stay consistent.
 
 ## Trading Strategy Context
 - Entry: 100 shares at start of new trend (CCI crosses +100 or -100)

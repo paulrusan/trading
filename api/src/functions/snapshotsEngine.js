@@ -1,10 +1,16 @@
 import { app } from '@azure/functions'
-import { computeSnapshotUpdate } from '../computeSnapshot.js'
+import { backfillTrendHistory, computeSnapshotUpdate } from '../computeSnapshot.js'
 import { getContainer } from '../cosmosClient.js'
 import { fetchCandles } from '../marketDataFetchers.js'
 import { verifyAuth } from '../verifyAuth.js'
 
 const OUTPUT_SIZE_BY_INTERVAL = { '1h': 300, '4h': 300, '1day': 300, '1week': 300 }
+const BACKFILL_OUTPUT_SIZE = { '1h': 2000, '4h': 2000, '1day': 5000, '1week': 5000 }
+
+// Cosmos doc ids can't contain '/', which real symbols do (e.g. "XAU/USD").
+function idPrefix(symbol, dataSource, interval) {
+  return `${symbol}_${dataSource}_${interval}`.replace(/[/\\?#]/g, '-')
+}
 
 async function getLatestSnapshot(symbol, dataSource, interval) {
   const { resources } = await getContainer('snapshots')
@@ -52,10 +58,9 @@ export async function runSnapshotsCheck(log = () => {}) {
       }
 
       const { snapshot, closedTrend } = result
-      // Cosmos doc ids can't contain '/', which real symbols do (e.g. "XAU/USD").
-      const idPrefix = `${symbol}_${dataSource}_${interval}`.replace(/[/\\?#]/g, '-')
+      const prefix = idPrefix(symbol, dataSource, interval)
       const doc = {
-        id: `${idPrefix}_${snapshot.timestamp}`,
+        id: `${prefix}_${snapshot.timestamp}`,
         symbol,
         dataSource,
         interval,
@@ -66,7 +71,7 @@ export async function runSnapshotsCheck(log = () => {}) {
 
       if (closedTrend) {
         await getContainer('trends').items.upsert({
-          id: `${idPrefix}_${closedTrend.startTime}`,
+          id: `${prefix}_${closedTrend.startTime}`,
           symbol,
           dataSource,
           interval,
@@ -82,6 +87,39 @@ export async function runSnapshotsCheck(log = () => {}) {
   }
 
   return { watchedActive: watched.length, groups: groups.size, updated, trendsClosed, failed, failures }
+}
+
+// One-time (or re-runnable) reconstruction of history from candles already on hand,
+// rather than only accumulating forward from whenever the symbol was added to the
+// watchlist. Writes only the bars where something happened (a non-'hold' signal) plus
+// the final/current bar — not every single 'hold' bar, which for a few thousand hourly
+// candles would mean a few thousand near-identical Cosmos writes for one on-demand call.
+export async function runBackfill(symbol, dataSource, interval, log = () => {}) {
+  const candles = await fetchCandles(symbol, interval, BACKFILL_OUTPUT_SIZE[interval] ?? 2000, dataSource)
+  const { events, trends } = backfillTrendHistory(candles)
+  const prefix = idPrefix(symbol, dataSource, interval)
+
+  for (const snapshot of events) {
+    await getContainer('snapshots').items.upsert({
+      id: `${prefix}_${snapshot.timestamp}`,
+      symbol,
+      dataSource,
+      interval,
+      ...snapshot,
+    })
+  }
+  for (const t of trends) {
+    await getContainer('trends').items.upsert({
+      id: `${prefix}_${t.startTime}`,
+      symbol,
+      dataSource,
+      interval,
+      ...t,
+    })
+  }
+
+  log(`Backfilled ${symbol}|${dataSource}|${interval}: ${candles.length} candles, ${events.length} events, ${trends.length} trends`)
+  return { candles: candles.length, events: events.length, trends: trends.length }
 }
 
 app.timer('snapshotsEngine', {
@@ -102,5 +140,28 @@ app.http('snapshotsRun', {
 
     const summary = await runSnapshotsCheck((msg) => context.log(msg))
     return { jsonBody: summary }
+  },
+})
+
+app.http('snapshotsBackfill', {
+  methods: ['POST'],
+  route: 'snapshots/backfill',
+  authLevel: 'anonymous',
+  handler: async (request, context) => {
+    const uid = await verifyAuth(request)
+    if (!uid) return { status: 401, jsonBody: { error: 'Unauthorized' } }
+
+    const body = await request.json()
+    const { symbol, dataSource, interval } = body
+    if (!symbol || !dataSource || !interval) {
+      return { status: 400, jsonBody: { error: 'symbol, dataSource, and interval are required.' } }
+    }
+
+    try {
+      const summary = await runBackfill(symbol, dataSource, interval, (msg) => context.log(msg))
+      return { jsonBody: summary }
+    } catch (err) {
+      return { status: err.status ?? 500, jsonBody: { error: err.message } }
+    }
   },
 })
