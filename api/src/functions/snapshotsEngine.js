@@ -38,13 +38,18 @@ export async function runSnapshotsCheck(log = () => {}) {
   let updated = 0
   let trendsClosed = 0
   let failed = 0
+  const failures = []
 
   for (const [key, { symbol, dataSource, interval }] of groups) {
     try {
       const candles = await fetchCandles(symbol, interval, OUTPUT_SIZE_BY_INTERVAL[interval] ?? 300, dataSource)
       const prevSnapshot = await getLatestSnapshot(symbol, dataSource, interval)
       const result = computeSnapshotUpdate(candles, prevSnapshot)
-      if (!result) continue // not enough candles yet
+      if (!result) {
+        log(`Skipped ${key}: only ${candles.length} candle(s), not enough for CCI(14) yet`)
+        failures.push({ key, message: `Only ${candles.length} candle(s) returned — not enough for CCI(14) yet` })
+        continue
+      }
 
       const { snapshot, closedTrend } = result
       // Cosmos doc ids can't contain '/', which real symbols do (e.g. "XAU/USD").
@@ -72,10 +77,11 @@ export async function runSnapshotsCheck(log = () => {}) {
     } catch (err) {
       log(`Failed to snapshot ${key}: ${err.message}`)
       failed++
+      failures.push({ key, message: err.message })
     }
   }
 
-  return { watchedActive: watched.length, groups: groups.size, updated, trendsClosed, failed }
+  return { watchedActive: watched.length, groups: groups.size, updated, trendsClosed, failed, failures }
 }
 
 app.timer('snapshotsEngine', {

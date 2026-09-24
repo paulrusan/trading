@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { SymbolSearchInput } from '../components/SymbolSearchInput'
 import { useApi } from '../hooks/useApi'
 
 const DATA_SOURCES = [
@@ -39,6 +40,7 @@ export default function Watchlist() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [runStatus, setRunStatus] = useState('')
+  const [runFailures, setRunFailures] = useState([])
   const [running, setRunning] = useState(false)
 
   const loadEntries = () => {
@@ -102,11 +104,13 @@ export default function Watchlist() {
   const handleRunNow = async () => {
     setRunning(true)
     setRunStatus('')
+    setRunFailures([])
     try {
       const summary = await api.runSnapshotsCheck()
       setRunStatus(
         `Checked ${summary.groups} symbol(s) — ${summary.updated} snapshot(s) updated, ${summary.trendsClosed} trend(s) closed, ${summary.failed} failed.`,
       )
+      setRunFailures(summary.failures ?? [])
       loadEntries()
     } catch (err) {
       setRunStatus(err.message)
@@ -137,20 +141,28 @@ export default function Watchlist() {
       </p>
 
       {runStatus && <p className="mb-4 text-sm text-text-muted">{runStatus}</p>}
+      {runFailures.length > 0 && (
+        <ul className="-mt-3 mb-4 list-inside list-disc text-xs text-loss">
+          {runFailures.map((f, i) => (
+            <li key={i}>
+              {f.key}: {f.message}
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div className="mb-6 rounded-lg border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium text-text-muted">Add symbol</h2>
         <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-3">
-          <input
-            type="text"
-            placeholder="Symbol, e.g. XAU/USD"
+          <SymbolSearchInput
+            dataSource={form.dataSource}
             value={form.symbol}
-            onChange={(e) => setForm((prev) => ({ ...prev, symbol: e.target.value }))}
-            className="w-40 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none focus:border-accent"
+            onChange={(symbol) => setForm((prev) => ({ ...prev, symbol }))}
+            placeholder="Search symbol, e.g. USD/CAD"
           />
           <select
             value={form.dataSource}
-            onChange={(e) => setForm((prev) => ({ ...prev, dataSource: e.target.value }))}
+            onChange={(e) => setForm((prev) => ({ ...prev, dataSource: e.target.value, symbol: '' }))}
             className="rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none focus:border-accent"
           >
             {DATA_SOURCES.map((s) => (
