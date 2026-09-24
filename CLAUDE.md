@@ -238,12 +238,18 @@ TradingView widget) for a clean look — axis border lines stay.
   not a bug.
 
 Indicators (`src/lib/indicators.js`, pure functions, no side effects): EMA,
-SMA, Bollinger Bands, CCI, RSI, MACD, ATR, Stochastic, and a Heikin Ashi
-transform. Each has user-editable settings in the Indicators dropdown
-(period/fast/slow/signal/etc.) that drive both charts and the Claude
-context — **Parabolic SAR and ADX are not implemented yet** even though
-they're referenced in "Trading Strategy Context" below; add them here if/when
-the strategy needs them.
+SMA, Bollinger Bands, CCI, RSI, MACD, ATR, Stochastic, Parabolic SAR, ADX,
+and a Heikin Ashi transform. Each has user-editable settings in the
+Indicators dropdown (period/fast/slow/signal/etc.) that drive both charts
+and the Claude context. Parabolic SAR renders as dots on the price pane
+(`lineVisible: false, pointMarkersVisible: true` in `TwelveDataChart.jsx`)
+rather than a connected line, matching how it's conventionally drawn. ADX
+needs `2 * period` bars before its first value (it's a Wilder-smoothed
+average of DX, which itself needs `period` bars of smoothed +DM/-DM/TR
+first) — noticeably more warm-up than the other oscillators here, so it can
+legitimately return fewer points on a freshly-loaded short history. Both
+are ported to `api/src/lib/indicators.js` like the rest, verified
+byte-identical to the frontend copy.
 
 ### Market data — `GET /api/market-data` (Twelve Data or Yahoo Finance, user-selectable)
 `marketData.js` fetches from either provider based on a `source` query
@@ -360,8 +366,8 @@ Strategy Context" below for the entry/exit rules that matrix should encode.
 - Partial sell: 30-40 shares when trend loses momentum (CCI weakening)
 - Re-entry: 100 shares at start of next wave
 - Indicators referenced by the strategy: CCI (14), EMA 20/50, Parabolic SAR,
-  Heikin Ashi candles — SAR is not implemented in `indicators.js` yet (see
-  "Chart Analysis" above)
+  Heikin Ashi candles — all implemented in `indicators.js` (see "Chart
+  Analysis" above)
 
 ## Phase 1 — Scaffold & Deploy
 1. Run in terminal (outside Claude Code):

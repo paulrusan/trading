@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react'
 import { getChartColors, usePrefersDark } from '../lib/chartColors'
 import { toHeikinAshi } from '../lib/indicators'
 
-const OSCILLATOR_ORDER = ['cci', 'rsi', 'macd', 'atr', 'stoch']
+const OSCILLATOR_ORDER = ['cci', 'rsi', 'macd', 'atr', 'stoch', 'adx']
 const DEFAULT_VISIBLE_BARS = {
   '1h': 500,
   '4h': 500,
@@ -145,11 +145,20 @@ export function TwelveDataChart({
         hitTestSeries.push({ key: 'bb', series: upperSeries })
         hitTestSeries.push({ key: 'bb', series: lowerSeries })
       }
+      if (indicators.sar) {
+        const s = chart.addSeries(
+          LineSeries,
+          { color: colors.accent, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2 },
+          0,
+        )
+        s.setData(reindex(indicators.sar.points))
+        hitTestSeries.push({ key: 'sar', series: s })
+      }
 
       const enabledOscillators = OSCILLATOR_ORDER.filter((key) => indicators[key])
       enabledOscillators.forEach((key, idx) => {
         const paneIndex = idx + 1
-        if (key === 'cci' || key === 'rsi' || key === 'atr') {
+        if (key === 'cci' || key === 'rsi' || key === 'atr' || key === 'adx') {
           const s = chart.addSeries(LineSeries, { color: colors.accent, lineWidth: 1 }, paneIndex)
           s.setData(reindex(indicators[key].points))
           hitTestSeries.push({ key, series: s })

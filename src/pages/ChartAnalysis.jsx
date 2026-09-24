@@ -4,11 +4,13 @@ import { useApi } from '../hooks/useApi'
 import { TradingViewWidget } from '../components/TradingViewWidget'
 import { TwelveDataChart } from '../components/TwelveDataChart'
 import {
+  computeADX,
   computeATR,
   computeBollingerBands,
   computeCCI,
   computeEMA,
   computeMACD,
+  computeParabolicSAR,
   computeRSI,
   computeSMA,
   computeStochastic,
@@ -104,6 +106,23 @@ const INDICATOR_DEFS = [
       { key: 'kPeriod', label: '%K', default: 14, tvOverrideKey: 'k length' },
       { key: 'dPeriod', label: '%D', default: 3, tvOverrideKey: 'd length' },
     ],
+  },
+  {
+    key: 'sar',
+    label: 'Parabolic SAR',
+    tvStudy: 'PSAR@tv-basicstudies',
+    tvOverrideName: 'parabolic sar',
+    params: [
+      { key: 'step', label: 'Step', default: 0.02, tvOverrideKey: 'increment' },
+      { key: 'maxStep', label: 'Max', default: 0.2, tvOverrideKey: 'maximum' },
+    ],
+  },
+  {
+    key: 'adx',
+    label: 'ADX',
+    tvStudy: 'DM@tv-basicstudies', // "Directional Movement" study — plots ADX (+ +DI/-DI)
+    tvOverrideName: 'directional movement',
+    params: [{ key: 'period', label: 'Period', default: 14, tvOverrideKey: 'length' }],
   },
 ]
 const DEFAULT_ENABLED = new Set(['ema', 'cci'])
@@ -203,6 +222,16 @@ function computeEnabledIndicators(candles, settings) {
       dPeriod: settings.stoch.dPeriod,
       ...computeStochastic(candles, settings.stoch.kPeriod, settings.stoch.dPeriod),
     }
+  }
+  if (settings.sar.enabled) {
+    data.sar = {
+      step: settings.sar.step,
+      maxStep: settings.sar.maxStep,
+      points: computeParabolicSAR(candles, settings.sar.step, settings.sar.maxStep),
+    }
+  }
+  if (settings.adx.enabled) {
+    data.adx = { period: settings.adx.period, points: computeADX(candles, settings.adx.period) }
   }
   return data
 }

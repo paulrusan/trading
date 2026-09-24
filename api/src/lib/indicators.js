@@ -181,6 +181,113 @@ export function computeATR(candles, period = 14) {
   return result
 }
 
+export function computeParabolicSAR(candles, step = 0.02, maxStep = 0.2) {
+  const result = []
+  if (candles.length < 2) return result
+
+  let isUptrend = candles[1].close >= candles[0].close
+  let sar = isUptrend ? candles[0].low : candles[0].high
+  let extremePoint = isUptrend ? candles[0].high : candles[0].low
+  let af = step
+
+  result.push({ time: candles[0].time, value: sar })
+
+  for (let i = 1; i < candles.length; i++) {
+    let nextSar = sar + af * (extremePoint - sar)
+
+    if (isUptrend) {
+      const priorLow1 = candles[i - 1].low
+      const priorLow2 = i >= 2 ? candles[i - 2].low : priorLow1
+      nextSar = Math.min(nextSar, priorLow1, priorLow2)
+
+      if (candles[i].low < nextSar) {
+        isUptrend = false
+        nextSar = extremePoint
+        extremePoint = candles[i].low
+        af = step
+      } else if (candles[i].high > extremePoint) {
+        extremePoint = candles[i].high
+        af = Math.min(af + step, maxStep)
+      }
+    } else {
+      const priorHigh1 = candles[i - 1].high
+      const priorHigh2 = i >= 2 ? candles[i - 2].high : priorHigh1
+      nextSar = Math.max(nextSar, priorHigh1, priorHigh2)
+
+      if (candles[i].high > nextSar) {
+        isUptrend = true
+        nextSar = extremePoint
+        extremePoint = candles[i].high
+        af = step
+      } else if (candles[i].low < extremePoint) {
+        extremePoint = candles[i].low
+        af = Math.min(af + step, maxStep)
+      }
+    }
+
+    sar = nextSar
+    result.push({ time: candles[i].time, value: sar })
+  }
+
+  return result
+}
+
+export function computeADX(candles, period = 14) {
+  const result = []
+  if (candles.length < period * 2) return result
+
+  const trueRanges = []
+  const plusDMs = []
+  const minusDMs = []
+  for (let i = 1; i < candles.length; i++) {
+    const prevClose = candles[i - 1].close
+    trueRanges.push(
+      Math.max(
+        candles[i].high - candles[i].low,
+        Math.abs(candles[i].high - prevClose),
+        Math.abs(candles[i].low - prevClose),
+      ),
+    )
+    const upMove = candles[i].high - candles[i - 1].high
+    const downMove = candles[i - 1].low - candles[i].low
+    plusDMs.push(upMove > downMove && upMove > 0 ? upMove : 0)
+    minusDMs.push(downMove > upMove && downMove > 0 ? downMove : 0)
+  }
+  // trueRanges[k]/plusDMs[k]/minusDMs[k] correspond to candles[k + 1].
+
+  let smoothedTR = trueRanges.slice(0, period).reduce((sum, v) => sum + v, 0)
+  let smoothedPlusDM = plusDMs.slice(0, period).reduce((sum, v) => sum + v, 0)
+  let smoothedMinusDM = minusDMs.slice(0, period).reduce((sum, v) => sum + v, 0)
+
+  const dxValues = []
+  const pushDx = () => {
+    const plusDI = (smoothedPlusDM / smoothedTR) * 100
+    const minusDI = (smoothedMinusDM / smoothedTR) * 100
+    const diSum = plusDI + minusDI
+    dxValues.push(diSum === 0 ? 0 : (Math.abs(plusDI - minusDI) / diSum) * 100)
+  }
+  pushDx() // dxValues[0] corresponds to candles[period]
+
+  for (let i = period; i < trueRanges.length; i++) {
+    smoothedTR = smoothedTR - smoothedTR / period + trueRanges[i]
+    smoothedPlusDM = smoothedPlusDM - smoothedPlusDM / period + plusDMs[i]
+    smoothedMinusDM = smoothedMinusDM - smoothedMinusDM / period + minusDMs[i]
+    pushDx() // dxValues[k] corresponds to candles[period + k]
+  }
+
+  if (dxValues.length < period) return result
+
+  let adx = dxValues.slice(0, period).reduce((sum, v) => sum + v, 0) / period
+  result.push({ time: candles[period + period - 1].time, value: adx })
+
+  for (let i = period; i < dxValues.length; i++) {
+    adx = (adx * (period - 1) + dxValues[i]) / period
+    result.push({ time: candles[period + i].time, value: adx })
+  }
+
+  return result
+}
+
 export function computeStochastic(candles, kPeriod = 14, dPeriod = 3) {
   const kValues = []
 
