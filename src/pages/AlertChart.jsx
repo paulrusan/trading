@@ -7,7 +7,7 @@ import { useApi } from '../hooks/useApi'
 import { describeAlert } from '../lib/alertDescribe'
 import { getChartColors, usePrefersDark, withAlpha } from '../lib/chartColors'
 import { DEFAULT_INDICATOR_STATE, INDICATOR_DEFS, computeEnabledIndicators } from '../lib/indicatorDefs'
-import { toHeikinAshi } from '../lib/indicators'
+import { computeCCI } from '../lib/indicators'
 import { toTradingViewSymbol } from '../lib/tradingViewSymbols'
 
 const OUTPUT_SIZE_BY_INTERVAL = { '1h': 2000, '4h': 2000, '1day': 5000, '1week': 5000 }
@@ -26,6 +26,15 @@ const SESSION_COUNT = 5
 // default period the same way, not leave whatever was set on the previous timeframe.
 const CCI_PERIOD_BY_INTERVAL = { '1h': 20, '4h': 20, '1day': 9, '1week': 9 }
 
+// EMA is on by default on ChartAnalysis.jsx (see DEFAULT_INDICATOR_STATE), but here CCI is
+// the only thing that actually drives the alert/sessions below, so it's the only one on by
+// default on this page — EMA/others are still available via the Indicators menu, just not
+// pre-enabled clutter.
+const INITIAL_INDICATOR_STATE = {
+  ...DEFAULT_INDICATOR_STATE,
+  ema: { ...DEFAULT_INDICATOR_STATE.ema, enabled: false },
+}
+
 function formatHours(hours) {
   if (hours < 48) return `${hours.toFixed(1)}h`
   return `${(hours / 24).toFixed(1)}d`
@@ -40,35 +49,47 @@ function formatTimeOfDay(unixSeconds) {
   })} UTC`
 }
 
-// The current (still-forming) Heikin Ashi color streak, plus the last N *completed* ones,
-// in the candles currently on screen — computed fresh from whatever candles are loaded for
-// the selected interval, not from any persisted history, so it reflects exactly what's
-// visible and updates with the interval switcher. A "session" here is a run of
-// same-colored HA candles.
-function computeHeikinAshiSessions(candles, count) {
+// The current (still-open) CCI-sign run, plus the last N *completed* ones, in the candles
+// currently on screen — computed fresh from whatever candles are loaded for the selected
+// interval, not from any persisted history, so it reflects exactly what's visible and
+// updates with the interval/CCI-period switcher.
+//
+// This used to be Heikin Ashi candle-color streaks, which looked wrong next to the CCI
+// pane: CCI can sit positive for days straight while individual HA candles still flip
+// green/red constantly within that broader move (that noisiness is exactly why the alert
+// rule doesn't use raw HA color alone — see CLAUDE.md's "Alerts" section). Sessions now use
+// the same CCI sign the alert itself is built on, so what's highlighted here always matches
+// what the CCI pane is actually showing.
+function computeCciSessions(candles, cciPeriod, count) {
   if (candles.length < 2) return { current: null, completed: [] }
-  const ha = toHeikinAshi(candles)
-  const colorOf = (c) => (c.close >= c.open ? 'up' : 'down')
+  const cci = computeCCI(candles, cciPeriod)
+  if (cci.length < 2) return { current: null, completed: [] }
+  const realTimeToIndex = new Map(candles.map((c, i) => [c.time, i]))
+  const signOf = (v) => (v >= 0 ? 'up' : 'down')
 
   const runs = []
-  let startIdx = 0
-  let dir = colorOf(ha[0])
-  for (let i = 1; i < ha.length; i++) {
-    const color = colorOf(ha[i])
-    if (color !== dir) {
-      runs.push({ direction: dir, startIdx, endIdx: i - 1 })
-      startIdx = i
-      dir = color
+  let startPoint = cci[0]
+  let dir = signOf(cci[0].value)
+  for (let i = 1; i < cci.length; i++) {
+    const s = signOf(cci[i].value)
+    if (s !== dir) {
+      runs.push({ direction: dir, startTime: startPoint.time, endTime: cci[i - 1].time })
+      startPoint = cci[i]
+      dir = s
     }
   }
-  const currentRun = { direction: dir, startIdx, endIdx: ha.length - 1 }
+  const currentRun = { direction: dir, startTime: startPoint.time, endTime: cci[cci.length - 1].time }
 
-  const toSession = (s) => ({
-    direction: s.direction,
-    startTime: candles[s.startIdx].time,
-    endTime: candles[s.endIdx].time,
-    candleCount: s.endIdx - s.startIdx + 1,
-  })
+  const toSession = (r) => {
+    const startIdx = realTimeToIndex.get(r.startTime)
+    const endIdx = realTimeToIndex.get(r.endTime)
+    return {
+      direction: r.direction,
+      startTime: r.startTime,
+      endTime: r.endTime,
+      candleCount: startIdx !== undefined && endIdx !== undefined ? endIdx - startIdx + 1 : null,
+    }
+  }
 
   return {
     current: toSession(currentRun),
@@ -92,7 +113,7 @@ export default function AlertChart() {
   const [error, setError] = useState('')
 
   const [candleType, setCandleType] = useState('heikinAshi')
-  const [indicatorSettings, setIndicatorSettings] = useState(DEFAULT_INDICATOR_STATE)
+  const [indicatorSettings, setIndicatorSettings] = useState(INITIAL_INDICATOR_STATE)
   const [indicatorOpenRequest, setIndicatorOpenRequest] = useState(null)
   const [showCompare, setShowCompare] = useState(false)
 
@@ -177,8 +198,8 @@ export default function AlertChart() {
   )
 
   const { current: currentSession, completed: completedSessions } = useMemo(
-    () => computeHeikinAshiSessions(candles, SESSION_COUNT),
-    [candles],
+    () => computeCciSessions(candles, indicatorSettings.cci.period, SESSION_COUNT),
+    [candles, indicatorSettings.cci.period],
   )
 
   // Light background highlight per session (current + completed) — see
@@ -302,7 +323,8 @@ export default function AlertChart() {
 
       <div className="mb-6 rounded-lg border border-border bg-surface p-4">
         <h2 className="mb-2 text-sm font-medium text-text-muted">
-          {INTERVALS.find((i) => i.value === interval)?.label ?? interval} sessions
+          {INTERVALS.find((i) => i.value === interval)?.label ?? interval} sessions — CCI(
+          {indicatorSettings.cci.period})
         </h2>
 
         {currentSession && (
@@ -358,10 +380,12 @@ export default function AlertChart() {
         )}
 
         <p className="mt-3 text-xs text-text-muted">
-          A "session" here is a run of same-colored Heikin Ashi candles on the currently
-          selected timeframe — computed fresh from the candles on screen right now, not
-          from any saved history. Switch timeframe above to recompute. Highlighted on the
-          chart above and in the row shading here: light green (up) / light red (down).
+          A "session" here is a run of CCI({indicatorSettings.cci.period}) staying on one
+          side of zero on the currently selected timeframe — the same indicator/period the
+          alert itself uses — computed fresh from the candles on screen right now, not from
+          any saved history. Switch timeframe above (or the CCI period in Indicators ▾) to
+          recompute. Highlighted on the chart above and in the row shading here: light green
+          (up) / light red (down).
         </p>
       </div>
 
