@@ -7,6 +7,7 @@ import { useApi } from '../hooks/useApi'
 import { describeAlert } from '../lib/alertDescribe'
 import { getChartColors, usePrefersDark, withAlpha } from '../lib/chartColors'
 import { DEFAULT_INDICATOR_STATE, INDICATOR_DEFS, computeEnabledIndicators } from '../lib/indicatorDefs'
+import { formatDate, formatDateTime } from '../lib/formatDate'
 import { computeCCI } from '../lib/indicators'
 import { toTradingViewSymbol } from '../lib/tradingViewSymbols'
 
@@ -41,9 +42,8 @@ function formatHours(hours) {
 }
 
 // Viewer's local timezone (no `timeZone` override), not UTC — matches the "Entry (date)"
-// column next to it, which was already local via the no-argument toLocaleDateString calls
-// below. `timeZoneName: 'short'` labels which zone that actually is, since it's no longer
-// a fixed, always-the-same "UTC" suffix.
+// column next to it, which is local via formatDate(). `timeZoneName: 'short'` labels which
+// zone that actually is, since it's no longer a fixed, always-the-same "UTC" suffix.
 function formatTimeOfDay(unixSeconds) {
   return new Date(unixSeconds * 1000).toLocaleTimeString([], {
     hour: '2-digit',
@@ -338,7 +338,7 @@ export default function AlertChart() {
               {currentSession.direction === 'up' ? 'Up' : 'Down'}
             </span>{' '}
             <span className="text-sm text-text-muted sm:text-base">
-              since {new Date(currentSession.startTime * 1000).toLocaleDateString()}{' '}
+              since {formatDate(currentSession.startTime * 1000)}{' '}
               {formatTimeOfDay(currentSession.startTime)} — running{' '}
               {formatHours((currentSession.endTime - currentSession.startTime) / 3600)} so far (
               {currentSession.candleCount} candle{currentSession.candleCount === 1 ? '' : 's'}), still open.
@@ -371,7 +371,7 @@ export default function AlertChart() {
                       {s.direction === 'up' ? 'Up' : 'Down'}
                     </td>
                     <td className="py-2 pr-4 text-text-muted">
-                      {new Date(s.startTime * 1000).toLocaleDateString()}
+                      {formatDate(s.startTime * 1000)}
                     </td>
                     <td className="py-2 pr-4 text-text-muted">{formatTimeOfDay(s.startTime)}</td>
                     <td className="py-2 pr-4 text-text">{formatHours((s.endTime - s.startTime) / 3600)}</td>
@@ -419,8 +419,8 @@ export default function AlertChart() {
                       backgroundColor: withAlpha(i % 2 === 0 ? colors.profit : colors.loss, 0.06),
                     }}
                   >
-                    <td className="py-2 pr-4 text-text">{new Date(t.candleTime * 1000).toLocaleString()}</td>
-                    <td className="py-2 text-text-muted">{new Date(t.triggeredAt).toLocaleString()}</td>
+                    <td className="py-2 pr-4 text-text">{formatDateTime(t.candleTime * 1000)}</td>
+                    <td className="py-2 text-text-muted">{formatDateTime(t.triggeredAt)}</td>
                   </tr>
                 ))}
               </tbody>

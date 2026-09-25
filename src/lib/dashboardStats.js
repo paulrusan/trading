@@ -1,3 +1,4 @@
+import { formatDateOnly, formatMonthOnly } from './formatDate'
 import { hasRealizedActivity, realizedPnl } from './tradePnl'
 
 export function computeStats(trades) {
@@ -40,7 +41,7 @@ export function computeEquityCurve(trades) {
   let cumulative = 0
   return realizedEvents(trades).map((e) => {
     cumulative += e.pnl
-    return { date: e.date, cumulative }
+    return { date: formatDateOnly(e.date), cumulative }
   })
 }
 
@@ -61,9 +62,9 @@ export function computeMonthlyPerformance(trades) {
     const month = e.date.slice(0, 7)
     map.set(month, (map.get(month) ?? 0) + e.pnl)
   }
-  return Array.from(map, ([month, pnl]) => ({ month, pnl })).sort((a, b) =>
-    a.month.localeCompare(b.month),
-  )
+  return Array.from(map, ([month, pnl]) => ({ month, pnl }))
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .map(({ month, pnl }) => ({ month: formatMonthOnly(month), pnl }))
 }
 
 export function computeWinLoss(trades) {

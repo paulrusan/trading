@@ -3,6 +3,7 @@ import { TradeDrawer } from '../components/TradeDrawer'
 import { TradeSellModal } from '../components/TradeSellModal'
 import { useApi } from '../hooks/useApi'
 import { DEFAULT_INSTRUMENTS, STATUS_LABELS } from '../lib/constants'
+import { formatDateOnly } from '../lib/formatDate'
 import { hasRealizedActivity, realizedPnl, remainingShares } from '../lib/tradePnl'
 
 const STATUS_TABS = ['all', 'open', 'partial', 'closed']
@@ -221,7 +222,7 @@ export default function Trades() {
                 <td className="px-4 py-3">
                   <DirectionBadge direction={trade.direction} />
                 </td>
-                <td className="px-4 py-3 text-text-muted">{trade.entryDate}</td>
+                <td className="px-4 py-3 text-text-muted">{formatDateOnly(trade.entryDate)}</td>
                 <td className="px-4 py-3 font-mono text-text">{trade.entryPrice}</td>
                 <td className="px-4 py-3 font-mono text-text">
                   {trade.status === 'open' ? trade.shares : `${remainingShares(trade)}/${trade.shares}`}

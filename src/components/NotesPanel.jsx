@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApi } from '../hooks/useApi'
+import { formatDate } from '../lib/formatDate'
 
 function titleFromContent(content) {
   const firstLine = content.split('\n')[0].trim()
@@ -126,7 +127,7 @@ export function NotesPanel() {
             >
               <div className="truncate font-medium">{note.title || 'Untitled'}</div>
               <div className="text-xs text-text-muted">
-                {new Date(note.updatedAt).toLocaleDateString()}
+                {formatDate(note.updatedAt)}
               </div>
             </button>
           ))}

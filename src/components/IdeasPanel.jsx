@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useApi } from '../hooks/useApi'
 import { IDEA_STATUS_LABELS } from '../lib/constants'
+import { formatDate } from '../lib/formatDate'
 import { IdeaDrawer } from './IdeaDrawer'
 import { TradeDrawer } from './TradeDrawer'
 
@@ -127,7 +128,7 @@ export function IdeasPanel() {
             </div>
 
             <div className="text-xs text-text-muted">
-              {new Date(idea.createdAt).toLocaleDateString()}
+              {formatDate(idea.createdAt)}
             </div>
 
             <div className="flex flex-wrap gap-3 border-t border-border pt-3 text-xs">

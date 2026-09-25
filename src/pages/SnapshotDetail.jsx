@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { TwelveDataChart } from '../components/TwelveDataChart'
 import { useApi } from '../hooks/useApi'
+import { formatDateTime } from '../lib/formatDate'
 import { computeCCI, computeParabolicSAR, computeSMA } from '../lib/indicators'
 import { describeCondition, POSITION_LABEL, SIGNAL_LABEL, SIGNAL_MARKER, SIGNAL_STYLE } from '../lib/signalLabels'
 
@@ -302,7 +303,7 @@ export default function SnapshotDetail() {
                 </p>
               )}
               <p className="text-text-muted">
-                Last checked <span className="text-text">{new Date(latest.timestamp).toLocaleString()}</span>
+                Last checked <span className="text-text">{formatDateTime(latest.timestamp)}</span>
               </p>
             </div>
           </div>
@@ -372,9 +373,9 @@ export default function SnapshotDetail() {
                         {t.direction === 'long' ? 'Long' : 'Short'}
                       </td>
                       <td className="py-2 pr-4 text-text">{t.startPrice}</td>
-                      <td className="py-2 pr-4 text-text-muted">{new Date(t.startTime).toLocaleString()}</td>
+                      <td className="py-2 pr-4 text-text-muted">{formatDateTime(t.startTime)}</td>
                       <td className="py-2 pr-4 text-text">{t.endPrice}</td>
-                      <td className="py-2 pr-4 text-text-muted">{new Date(t.endTime).toLocaleString()}</td>
+                      <td className="py-2 pr-4 text-text-muted">{formatDateTime(t.endTime)}</td>
                       <td className="py-2 pr-4 text-text">
                         {formatHours(hoursBetween(t.startTime, t.endTime))}
                         {bars !== null && <span className="text-text-muted"> ({bars} candles)</span>}
@@ -395,7 +396,6 @@ export default function SnapshotDetail() {
       <p className="mt-4 text-xs text-text-muted">
         Signals: {SIGNAL_LABEL.buy}/{SIGNAL_LABEL.short} — CCI(20) crosses the zero line, gated by the
         SMA(200) regime. {SIGNAL_LABEL.exit_long}/{SIGNAL_LABEL.exit_short} — price crosses the Parabolic SAR.
-        See the Watchlist page for the full rule.
       </p>
     </div>
   )
