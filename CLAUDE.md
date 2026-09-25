@@ -390,6 +390,30 @@ again: check whether it's a Workspace-policy block (switch to a personal
 account) or a SendGrid-style trial/quota limit (switch provider or top up)
 before assuming it's a bad credential.
 
+**Missed-alert incident (2026-09-25):** three separate alerts (SI=F, XAU/USD,
+USD/CAD) each reconstructed as a clean, simultaneous condition match at the
+hour the user reported — confirmed by re-fetching real candle data and
+recomputing every condition (including a manual reconstruction of the
+partial daily CCI(9) bar as it would have read at that exact hour) — yet
+none ever fired (`lastTriggeredAt` stayed `null`). This Function App's plan
+has no Application Insights, so there's no way to see historical
+invocation success/failure/exceptions from the Portal — only a bare
+invocation *count* per hour (Overview → the function's row → "Invocations
+and more"), which did show the timer firing every hour including the hours
+in question, ruling out "the timer never fires" as the explanation. Since
+edge-triggered conditions only fire once per crossing (see above) and
+never retry the whole check, a single transient failure in the send step
+at exactly the wrong moment would silently and permanently eat an alert —
+the leading suspect given everything else checked out. Two mitigations
+landed from this: `sendAlertEmail` (`api/src/sendEmail.js`) now retries up
+to 3 times (1s/3s backoff) before actually giving up, and
+`runAlertsCheck` now writes a heartbeat doc (`lastRunAt`, `summary`,
+`error`) to the `settings` container (id `alertsEngineStatus`) on every
+run, exposed via `GET /alerts/status` and shown at the top of the Alerts
+page ("Hourly check last ran…", flagged red past 75 minutes) — so the
+next time something like this happens, the actual error is visible from
+the app itself instead of requiring Azure Portal archaeology.
+
 Because a timer trigger is painful to test locally (see `api/README.md`'s
 "Local dev limitation" note — it needs a real `AzureWebJobsStorage`, which
 this project's local dev leaves empty), the exact same check logic is also
