@@ -5,7 +5,7 @@ import { IndicatorMenu } from '../components/IndicatorMenu'
 import { TwelveDataChart } from '../components/TwelveDataChart'
 import { useApi } from '../hooks/useApi'
 import { describeAlert } from '../lib/alertDescribe'
-import { usePrefersDark } from '../lib/chartColors'
+import { getChartColors, usePrefersDark, withAlpha } from '../lib/chartColors'
 import { DEFAULT_INDICATOR_STATE, INDICATOR_DEFS, computeEnabledIndicators } from '../lib/indicatorDefs'
 import { toHeikinAshi } from '../lib/indicators'
 import { toTradingViewSymbol } from '../lib/tradingViewSymbols'
@@ -20,6 +20,11 @@ const INTERVALS = [
 ]
 const DATA_SOURCE_LABEL = { twelvedata: 'Twelve Data', yahoo: 'Yahoo' }
 const SESSION_COUNT = 5
+// The validated rule uses different CCI periods for different jobs — 9 on daily (catches a
+// trend early), 20 on 1h (needs a few more hours of price action to tell a real bounce from
+// a fake one; see CLAUDE.md's "Alerts" section). Switching timeframe here should switch the
+// default period the same way, not leave whatever was set on the previous timeframe.
+const CCI_PERIOD_BY_INTERVAL = { '1h': 20, '4h': 20, '1day': 9, '1week': 9 }
 
 function formatHours(hours) {
   if (hours < 48) return `${hours.toFixed(1)}h`
@@ -74,6 +79,7 @@ function computeHeikinAshiSessions(candles, count) {
 export default function AlertChart() {
   const api = useApi()
   const isDark = usePrefersDark()
+  const colors = getChartColors(isDark)
   const [searchParams, setSearchParams] = useSearchParams()
   const alertId = searchParams.get('alertId')
   const symbol = searchParams.get('symbol')
@@ -97,6 +103,12 @@ export default function AlertChart() {
       return next
     })
   }
+
+  useEffect(() => {
+    const period = CCI_PERIOD_BY_INTERVAL[interval]
+    if (!period) return
+    setIndicatorSettings((prev) => ({ ...prev, cci: { ...prev.cci, period } }))
+  }, [interval])
 
   useEffect(() => {
     if (!symbol) return
@@ -289,23 +301,17 @@ export default function AlertChart() {
       />
 
       <div className="mb-6 rounded-lg border border-border bg-surface p-4">
-        <h2 className="mb-1 text-sm font-medium text-text-muted">
+        <h2 className="mb-2 text-sm font-medium text-text-muted">
           {INTERVALS.find((i) => i.value === interval)?.label ?? interval} sessions
         </h2>
-        <p className="mb-3 text-xs text-text-muted">
-          A "session" here is a run of same-colored Heikin Ashi candles on the currently
-          selected timeframe — computed fresh from the candles on screen right now, not
-          from any saved history. Switch timeframe above to recompute. Highlighted on the
-          chart above in light green (up) / red (down).
-        </p>
 
         {currentSession && (
-          <p className="mb-3 text-sm">
+          <p className="mb-4 text-base sm:text-lg">
             <span className="font-medium text-text-muted">Current: </span>
-            <span className={currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}>
+            <span className={`font-semibold ${currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
               {currentSession.direction === 'up' ? 'Up' : 'Down'}
             </span>{' '}
-            <span className="text-text-muted">
+            <span className="text-sm text-text-muted sm:text-base">
               since {new Date(currentSession.startTime * 1000).toLocaleDateString()}{' '}
               {formatTimeOfDay(currentSession.startTime)} — running{' '}
               {formatHours((currentSession.endTime - currentSession.startTime) / 3600)} so far (
@@ -330,7 +336,11 @@ export default function AlertChart() {
               </thead>
               <tbody>
                 {completedSessions.map((s, i) => (
-                  <tr key={i} className="border-t border-border even:bg-bg">
+                  <tr
+                    key={i}
+                    className="border-t border-border"
+                    style={{ backgroundColor: withAlpha(s.direction === 'up' ? colors.profit : colors.loss, 0.08) }}
+                  >
                     <td className={`py-2 pr-4 ${s.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
                       {s.direction === 'up' ? 'Up' : 'Down'}
                     </td>
@@ -346,6 +356,13 @@ export default function AlertChart() {
             </table>
           </div>
         )}
+
+        <p className="mt-3 text-xs text-text-muted">
+          A "session" here is a run of same-colored Heikin Ashi candles on the currently
+          selected timeframe — computed fresh from the candles on screen right now, not
+          from any saved history. Switch timeframe above to recompute. Highlighted on the
+          chart above and in the row shading here: light green (up) / light red (down).
+        </p>
       </div>
 
       <div className="rounded-lg border border-border bg-surface p-4">
@@ -367,7 +384,13 @@ export default function AlertChart() {
               </thead>
               <tbody>
                 {triggerHistoryNewestFirst.map((t, i) => (
-                  <tr key={i} className="border-t border-border even:bg-bg">
+                  <tr
+                    key={i}
+                    className="border-t border-border"
+                    style={{
+                      backgroundColor: withAlpha(i % 2 === 0 ? colors.profit : colors.loss, 0.06),
+                    }}
+                  >
                     <td className="py-2 pr-4 text-text">{new Date(t.candleTime * 1000).toLocaleString()}</td>
                     <td className="py-2 text-text-muted">{new Date(t.triggeredAt).toLocaleString()}</td>
                   </tr>

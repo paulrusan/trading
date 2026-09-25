@@ -43,7 +43,25 @@ function yahooToTradingViewSymbol(symbol) {
   return symbol // plain equity/ETF ticker — TradingView's widget resolves bare tickers fine
 }
 
+// Twelve Data forex/metal pairs (e.g. "USD/CAD", "XAU/USD") need an exchange prefix for
+// TradingView to resolve the right instrument — a bare "USDCAD" (no prefix) was silently
+// resolving to something else entirely. FX_IDC is TradingView's aggregate forex/metals
+// composite feed, broad enough to cover both majors and precious metals against a fiat.
+const FOREX_METAL_CODES = new Set([
+  'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD',
+  'CNY', 'HKD', 'SGD', 'SEK', 'NOK', 'DKK', 'MXN', 'ZAR', 'TRY', 'INR', 'BRL', 'PLN',
+  'XAU', 'XAG', 'XPT', 'XPD',
+])
+const FOREX_PAIR_RE = /^([A-Z]{3})\/([A-Z]{3})$/
+
+function isForexOrMetalPair(symbol) {
+  const match = FOREX_PAIR_RE.exec(symbol)
+  return !!match && FOREX_METAL_CODES.has(match[1]) && FOREX_METAL_CODES.has(match[2])
+}
+
 export function toTradingViewSymbol(symbol, dataSource) {
   if (!symbol) return null
-  return dataSource === 'yahoo' ? yahooToTradingViewSymbol(symbol) : symbol.replace('/', '')
+  if (dataSource === 'yahoo') return yahooToTradingViewSymbol(symbol)
+  if (isForexOrMetalPair(symbol)) return `FX_IDC:${symbol.replace('/', '')}`
+  return symbol.replace('/', '')
 }
