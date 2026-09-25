@@ -41,11 +41,25 @@ class TrendBandsPaneView {
       this._bands = []
       return
     }
-    this._bands = this._source.segments.map((s) => ({
-      x1: timeScale.timeToCoordinate(s.fromIndex),
-      x2: timeScale.timeToCoordinate(s.toIndex + 1),
-      color: s.color,
-    }))
+    // toIndex + 1 is the left edge of the *next* bar — used as this band's right edge so it
+    // reaches all the way to the following bar rather than stopping mid-bar. For the
+    // still-open current session, toIndex is the very last candle in the dataset, so
+    // toIndex + 1 has no coordinate (timeToCoordinate returns null) and the band would
+    // otherwise silently not draw at all — fall back to the last bar's own coordinate plus
+    // one bar's pixel width in that case.
+    const barSpacing = timeScale.options().barSpacing
+    this._bands = this._source.segments.map((s) => {
+      let x2 = timeScale.timeToCoordinate(s.toIndex + 1)
+      if (x2 == null) {
+        const lastBarX = timeScale.timeToCoordinate(s.toIndex)
+        x2 = lastBarX != null ? lastBarX + barSpacing : null
+      }
+      return {
+        x1: timeScale.timeToCoordinate(s.fromIndex),
+        x2,
+        color: s.color,
+      }
+    })
   }
 
   renderer() {
