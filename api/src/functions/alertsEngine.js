@@ -15,7 +15,36 @@ const OUTPUT_SIZE_BY_INTERVAL = { '1h': 200, '4h': 200, '1day': 200, '1week': 20
 // condition alongside an hourly trigger condition in the same alert), so alerts are
 // grouped by symbol/dataSource only — not by a single interval — and every distinct
 // interval any of that symbol's conditions need is fetched once and shared.
+// A fixed, non-user doc in the 'settings' container recording when the hourly check last
+// actually ran and what it found — the only way to tell (from inside the app, without
+// digging through the Azure Portal, which for this Function App's plan has no searchable
+// invocation history without Application Insights) whether a given hour's tick fired.
+const STATUS_DOC_ID = 'alertsEngineStatus'
+
 export async function runAlertsCheck(log = () => {}) {
+  try {
+    const result = await runAlertsCheckInner(log)
+    await getContainer('settings').items.upsert({
+      id: STATUS_DOC_ID,
+      userId: STATUS_DOC_ID,
+      lastRunAt: new Date().toISOString(),
+      summary: result,
+      error: null,
+    })
+    return result
+  } catch (err) {
+    await getContainer('settings').items.upsert({
+      id: STATUS_DOC_ID,
+      userId: STATUS_DOC_ID,
+      lastRunAt: new Date().toISOString(),
+      summary: null,
+      error: err.message,
+    })
+    throw err
+  }
+}
+
+async function runAlertsCheckInner(log) {
   const container = getContainer('alerts')
   const { resources: alerts } = await container.items
     .query({ query: 'SELECT * FROM c WHERE c.active = true' })
@@ -115,5 +144,23 @@ app.http('alertsRun', {
 
     const summary = await runAlertsCheck((msg) => context.log(msg))
     return { jsonBody: summary }
+  },
+})
+
+app.http('alertsStatus', {
+  methods: ['GET'],
+  route: 'alerts/status',
+  authLevel: 'anonymous',
+  handler: async (request) => {
+    const uid = await verifyAuth(request)
+    if (!uid) return { status: 401, jsonBody: { error: 'Unauthorized' } }
+
+    try {
+      const { resource } = await getContainer('settings').item(STATUS_DOC_ID, STATUS_DOC_ID).read()
+      return { jsonBody: resource ? { lastRunAt: resource.lastRunAt, summary: resource.summary, error: resource.error } : null }
+    } catch (err) {
+      if (err.code === 404) return { jsonBody: null } // hourly check hasn't run since this was added
+      throw err
+    }
   },
 })

@@ -440,6 +440,31 @@ function AlertFormModal({ initialForm, isEdit, onClose, onSubmit }) {
   )
 }
 
+// The hourly timer writes this after every run (fires or not), so this line is the only
+// way to tell "did the automated check actually run this hour" without digging through
+// Azure Portal logs — this app's Function App plan has no searchable invocation history
+// without Application Insights, which isn't configured.
+function EngineStatusLine({ status }) {
+  const minutesAgo = (Date.now() - new Date(status.lastRunAt).getTime()) / 60000
+  const stale = minutesAgo > 75 // hourly schedule + slack for a slightly late tick
+
+  if (status.error) {
+    return (
+      <p className="mb-4 text-xs text-loss">
+        Hourly check last ran {formatDateTime(status.lastRunAt)} and failed: {status.error}
+      </p>
+    )
+  }
+
+  return (
+    <p className={`mb-4 text-xs ${stale ? 'text-loss' : 'text-text-muted'}`}>
+      Hourly check last ran {formatDateTime(status.lastRunAt)}
+      {stale && ' — that\'s over an hour ago, the next tick may have been skipped'}
+      {status.summary && ` — ${status.summary.checked} checked, ${status.summary.triggered} triggered, ${status.summary.failed} failed`}
+    </p>
+  )
+}
+
 export default function Alerts() {
   const { user } = useAuth()
   const api = useApi()
@@ -450,6 +475,7 @@ export default function Alerts() {
   const [runStatus, setRunStatus] = useState('')
   const [running, setRunning] = useState(false)
   const [modalTarget, setModalTarget] = useState(null) // null = closed, 'new', or an alert object
+  const [engineStatus, setEngineStatus] = useState(undefined) // undefined = not loaded yet, null = loaded but no run recorded
 
   const loadAlerts = () => {
     setLoading(true)
@@ -460,8 +486,13 @@ export default function Alerts() {
       .finally(() => setLoading(false))
   }
 
+  const loadEngineStatus = () => {
+    api.getAlertsEngineStatus().then(setEngineStatus).catch(() => {})
+  }
+
   useEffect(() => {
     loadAlerts()
+    loadEngineStatus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -509,6 +540,7 @@ export default function Alerts() {
         `Checked ${summary.checked} alert(s) across ${summary.groups} symbol(s) — ${summary.triggered} triggered, ${summary.failed} failed.`,
       )
       loadAlerts()
+      loadEngineStatus()
     } catch (err) {
       setRunStatus(err.message)
     } finally {
@@ -538,6 +570,14 @@ export default function Alerts() {
           </button>
         </div>
       </div>
+
+      {engineStatus === undefined ? null : engineStatus === null ? (
+        <p className="mb-4 text-xs text-text-muted">
+          The hourly check hasn't run since this status tracker was added yet.
+        </p>
+      ) : (
+        <EngineStatusLine status={engineStatus} />
+      )}
 
       {runStatus && <p className="mb-4 text-sm text-text-muted">{runStatus}</p>}
       {error && <p className="mb-4 text-sm text-loss">{error}</p>}

@@ -104,6 +104,7 @@ export function useApi() {
   )
   const deleteAlert = useCallback((id) => call(`/alerts/${id}`, { method: 'DELETE' }), [call])
   const runAlertsCheck = useCallback(() => call('/alerts/run', { method: 'POST' }), [call])
+  const getAlertsEngineStatus = useCallback(() => call('/alerts/status', { method: 'GET' }), [call])
 
   const getWatchlist = useCallback(() => call('/watchlist', { method: 'GET' }), [call])
   const saveWatchlistEntry = useCallback(
@@ -160,6 +161,7 @@ export function useApi() {
     saveAlert,
     deleteAlert,
     runAlertsCheck,
+    getAlertsEngineStatus,
     getWatchlist,
     saveWatchlistEntry,
     deleteWatchlistEntry,
