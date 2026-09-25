@@ -36,7 +36,7 @@ trading-journal/
 │   │   │                              #   marketData.js and both hourly engines below
 │   │   ├── evaluateAlert.js           # edge-triggered, multi-interval condition evaluation for alerts
 │   │   ├── computeSnapshot.js         # CCI(20)/SMA(200) long/short signal state machine
-│   │   ├── sendEmail.js               # SendGrid v3 Mail Send API via fetch (no SDK)
+│   │   ├── sendEmail.js               # Gmail SMTP via nodemailer
 │   │   ├── lib/indicators.js          # server-side port of src/lib/indicators.js
 │   │   └── functions/
 │   │       ├── trades.js, ideas.js, notes.js, alerts.js, watchlist.js  # registerCrudRoutes(...)
@@ -369,18 +369,20 @@ notify-only by design — the user checks a 1-5 minute chart manually and
 picks the exact entry themselves; the alert's job is only to say "look
 now."
 
-Email delivery is SendGrid's v3 Mail Send API over plain `fetch`
-(`api/src/sendEmail.js`, no SDK — consistent with how the rest of this API
-talks to external services), app settings `SENDGRID_API_KEY` +
-`SENDGRID_FROM_EMAIL` (the sender address must be verified in
-SendGrid — Single Sender Verification or full domain auth). This is the
-**second** email provider this app has used: originally SendGrid, switched
-to Gmail SMTP via `nodemailer` mid-session, then switched back after
-discovering the Gmail sending account (`office@accountium.com`) is a
-Google Workspace mailbox with SMTP AUTH/App Passwords blocked by org
-policy — a server-side block no App Password regeneration could work
-around. If email delivery breaks again, check that first before assuming
-it's a credential issue.
+Email delivery is Gmail SMTP via `nodemailer` (`api/src/sendEmail.js`,
+`service: 'gmail'`), app settings `GMAIL_USER` + `GMAIL_APP_PASSWORD` (a
+Google App Password, not the account password — requires 2-Step
+Verification enabled on the account). This app has cycled through three
+email setups: originally SendGrid, switched to Gmail SMTP, switched back
+to SendGrid after finding the Gmail sending account (`office@accountium.com`)
+was a Google Workspace mailbox with SMTP AUTH/App Passwords blocked by org
+policy (server-side, no App Password could fix it), then switched back to
+Gmail SMTP again — this time with a genuine personal Gmail account
+(`heatherclydeca@gmail.com`) — after the SendGrid account's 60-day free
+trial ran out ("Maximum credits exceeded"). If email delivery breaks
+again: check whether it's a Workspace-policy block (switch to a personal
+account) or a SendGrid-style trial/quota limit (switch provider or top up)
+before assuming it's a bad credential.
 
 Because a timer trigger is painful to test locally (see `api/README.md`'s
 "Local dev limitation" note — it needs a real `AzureWebJobsStorage`, which

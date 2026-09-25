@@ -9,8 +9,8 @@
     "FIREBASE_CLIENT_EMAIL": "",
     "FIREBASE_PRIVATE_KEY": "",
     "TWELVE_DATA_API_KEY": "",
-    "SENDGRID_API_KEY": "",
-    "SENDGRID_FROM_EMAIL": ""
+    "GMAIL_USER": "",
+    "GMAIL_APP_PASSWORD": ""
   },
   "Host": {
     "CORS": "*"
