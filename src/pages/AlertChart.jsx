@@ -19,7 +19,7 @@ const INTERVALS = [
   { value: '1week', label: 'Weekly' },
 ]
 const DATA_SOURCE_LABEL = { twelvedata: 'Twelve Data', yahoo: 'Yahoo' }
-const SESSION_COUNT = 5
+const SESSION_COUNT = 10
 // The validated rule uses different CCI periods for different jobs — 9 on daily (catches a
 // trend early), 20 on 1h (needs a few more hours of price action to tell a real bounce from
 // a fake one; see CLAUDE.md's "Alerts" section). Switching timeframe here should switch the

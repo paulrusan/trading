@@ -325,10 +325,23 @@ export function TwelveDataChart({
         }
       })
 
-      const barCount = DEFAULT_VISIBLE_BARS[interval] ?? 252
+      // When trend bands are supplied (AlertChart.jsx), zoom to cover exactly that span —
+      // e.g. the last 10 CCI sessions — instead of a fixed generic bar count, so the initial
+      // view always matches what the sessions table below is describing. Falls back to the
+      // fixed count for pages that don't pass trendBands (ChartAnalysis.jsx, SnapshotDetail.jsx).
+      let barCount = DEFAULT_VISIBLE_BARS[interval] ?? 252
+      if (trendBands?.length) {
+        const earliestTime = Math.min(...trendBands.map((b) => b.time))
+        const idx = nearestIndex(candles, realTimeToIndex, earliestTime)
+        if (idx !== undefined) barCount = candles.length - idx
+      }
+      const visibleFrom = Math.max(0, candles.length - barCount)
+      // A few % of empty space past the last candle so it isn't jammed against the right
+      // edge — logical range can extend past the real data range; it just renders blank.
+      const rightPadding = Math.max(1, Math.round(barCount * 0.05))
       chart.timeScale().setVisibleLogicalRange({
-        from: Math.max(0, candles.length - barCount),
-        to: candles.length - 1,
+        from: visibleFrom,
+        to: candles.length - 1 + rightPadding,
       })
 
       const handleDblClick = (param) => {
