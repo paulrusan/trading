@@ -59,6 +59,8 @@ trading-journal/
 │   │   ├── indicators.js              # pure indicator math — see below
 │   │   ├── indicatorDefs.js           # INDICATOR_DEFS + computeEnabledIndicators — shared by ChartAnalysis.jsx/AlertChart.jsx
 │   │   ├── tradingViewSymbols.js      # toTradingViewSymbol + TV_INTERVAL/TV_STYLE — shared
+│   │   ├── alertDescribe.js           # INDICATORS + describeAlert/describeCondition — shared by Alerts.jsx/AlertChart.jsx
+│   │   ├── trendBandsPrimitive.js     # lightweight-charts background-band primitive (AlertChart.jsx's trend highlight)
 │   │   └── signalLabels.js            # SIGNAL_LABEL/SIGNAL_STYLE/POSITION_LABEL/SIGNAL_MARKER/describeCondition
 │   ├── components/
 │   │   ├── NavBar.jsx, PrivateRoute.jsx, TradeDrawer.jsx, TradeSellModal.jsx
@@ -404,17 +406,28 @@ sharing the exact same components and logic as `ChartAnalysis.jsx`
 indicator/TradingView-mapping logic itself; `IndicatorMenu.jsx` and
 `ComparePanel.jsx` hold the shared UI — extracted from `ChartAnalysis.jsx`
 so both pages stay in sync rather than maintaining two copies). On top of
-that, it keeps the alert-specific pieces: amber markers + a table for the
-alert's last 10 firings (`triggerHistory`), and a "last 5 sessions" table
-— the last 5 *completed* Heikin-Ashi-color runs on whatever interval is
-currently selected, with direction, entry date, entry time-of-day (UTC),
-duration, and candle count. That table is computed fresh, client-side,
-from the candles already loaded for the current interval
-(`computeHeikinAshiSessions` in `AlertChart.jsx`) — deliberately not
-reading from any persisted snapshot/trend history, so it reflects exactly
-what's on screen and updates immediately when the interval switcher
-changes, at the cost of not being the same "trade" concept the Watchlist
-below uses (it's pure HA-color-streak duration, no SMA/CCI/SAR involved).
+that, it keeps the alert-specific pieces: the alert's own condition,
+interval, match mode, and notify email shown by default at the top of the
+page (`describeAlert` from `src/lib/alertDescribe.js`, also shared with
+`Alerts.jsx`'s own list); amber markers + a zebra-striped table for the
+alert's last 10 firings (`triggerHistory`); and a Heikin-Ashi-color
+session summary — both a "Current" line (still open, direction + how long
+it's been running) and a zebra-striped table of the last 5 *completed*
+runs on whatever interval is currently selected, with direction, entry
+date, entry time-of-day (UTC), duration, and candle count.
+`computeHeikinAshiSessions` in `AlertChart.jsx` computes both fresh,
+client-side, from the candles already loaded for the current interval —
+deliberately not reading from any persisted snapshot/trend history, so it
+reflects exactly what's on screen and updates immediately when the
+interval switcher changes, at the cost of not being the same "trade"
+concept the Watchlist below uses (it's pure HA-color-streak duration, no
+SMA/CCI/SAR involved). Each session (current + completed) is also
+highlighted directly on the chart as a light green/red background band —
+`src/lib/trendBandsPrimitive.js`, a small lightweight-charts v5 series
+primitive using the library's `drawBackground` pane-view hook (its own
+docs call this out for exactly this — "time areas highlighting"), since
+there's no built-in series type for a background band tied to the time
+axis rather than the price scale.
 
 ## Watchlist (`/watchlist`) and the per-symbol snapshot/trend engine
 

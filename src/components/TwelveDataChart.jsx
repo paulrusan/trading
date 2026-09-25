@@ -10,6 +10,25 @@ import {
 import { useEffect, useRef } from 'react'
 import { getChartColors, usePrefersDark, withAlpha } from '../lib/chartColors'
 import { toHeikinAshi } from '../lib/indicators'
+import { TrendBandsPrimitive } from '../lib/trendBandsPrimitive'
+
+// Real UNIX time -> candle index, falling back to the nearest candle if there's no exact
+// match — shared by markers and trend bands, both of which specify times in real UNIX
+// seconds while the chart itself is indexed 0..N-1 (see the comment above `createChart`).
+function nearestIndex(candles, realTimeToIndex, time) {
+  const exact = realTimeToIndex.get(time)
+  if (exact !== undefined) return exact
+  let nearestTime = null
+  let nearestDiff = Infinity
+  for (const c of candles) {
+    const diff = Math.abs(c.time - time)
+    if (diff < nearestDiff) {
+      nearestDiff = diff
+      nearestTime = c.time
+    }
+  }
+  return nearestTime !== null ? realTimeToIndex.get(nearestTime) : undefined
+}
 
 const OSCILLATOR_ORDER = ['cci', 'rsi', 'macd', 'atr', 'stoch', 'adx']
 const DEFAULT_VISIBLE_BARS = {
@@ -51,6 +70,7 @@ export function TwelveDataChart({
   height = 400,
   onIndicatorDoubleClick,
   markers,
+  trendBands,
 }) {
   const isDark = usePrefersDark()
   const colors = getChartColors(isDark)
@@ -124,19 +144,7 @@ export function TwelveDataChart({
       if (markers?.length) {
         const converted = []
         for (const m of markers) {
-          let idx = realTimeToIndex.get(m.time)
-          if (idx === undefined) {
-            let nearestTime = null
-            let nearestDiff = Infinity
-            for (const c of candles) {
-              const diff = Math.abs(c.time - m.time)
-              if (diff < nearestDiff) {
-                nearestDiff = diff
-                nearestTime = c.time
-              }
-            }
-            idx = nearestTime !== null ? realTimeToIndex.get(nearestTime) : undefined
-          }
+          const idx = nearestIndex(candles, realTimeToIndex, m.time)
           if (idx === undefined) continue
           converted.push({
             time: idx,
@@ -147,6 +155,24 @@ export function TwelveDataChart({
           })
         }
         if (converted.length > 0) createSeriesMarkers(candleSeries, converted)
+      }
+
+      // Light background highlight per trend segment (see AlertChart.jsx's "last N
+      // sessions") — a primitive rather than a series, since there's no built-in
+      // "background band" series type; see lib/trendBandsPrimitive.js.
+      if (trendBands?.length) {
+        const segments = []
+        for (const b of trendBands) {
+          const fromIdx = nearestIndex(candles, realTimeToIndex, b.time)
+          const toIdx = nearestIndex(candles, realTimeToIndex, b.endTime)
+          if (fromIdx === undefined || toIdx === undefined) continue
+          segments.push({
+            fromIndex: fromIdx,
+            toIndex: toIdx,
+            color: withAlpha(b.direction === 'up' ? colors.profit : colors.loss, 0.12),
+          })
+        }
+        if (segments.length > 0) candleSeries.attachPrimitive(new TrendBandsPrimitive(segments))
       }
 
       // Tracks which indicator key each overlay/oscillator line belongs to, so a
@@ -335,7 +361,7 @@ export function TwelveDataChart({
       resizeObserver.disconnect()
       chart.remove()
     }
-  }, [colors, candles, candleType, indicators, interval, height, onIndicatorDoubleClick, markers])
+  }, [colors, candles, candleType, indicators, interval, height, onIndicatorDoubleClick, markers, trendBands])
 
   return <div ref={containerRef} style={{ height }} className="overflow-hidden rounded-lg border border-border" />
 }

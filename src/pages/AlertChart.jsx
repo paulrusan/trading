@@ -4,6 +4,7 @@ import { ComparePanel } from '../components/ComparePanel'
 import { IndicatorMenu } from '../components/IndicatorMenu'
 import { TwelveDataChart } from '../components/TwelveDataChart'
 import { useApi } from '../hooks/useApi'
+import { describeAlert } from '../lib/alertDescribe'
 import { usePrefersDark } from '../lib/chartColors'
 import { DEFAULT_INDICATOR_STATE, INDICATOR_DEFS, computeEnabledIndicators } from '../lib/indicatorDefs'
 import { toHeikinAshi } from '../lib/indicators'
@@ -34,37 +35,40 @@ function formatTimeOfDay(unixSeconds) {
   })} UTC`
 }
 
-// The last N *completed* Heikin Ashi color streaks in the candles currently on screen —
-// computed fresh from whatever candles are loaded for the selected interval, not from any
-// persisted history, so it reflects exactly what's visible and updates with the interval
-// switcher. A "session" here is a run of same-colored HA candles; the still-forming final
-// run is excluded since it isn't complete yet.
+// The current (still-forming) Heikin Ashi color streak, plus the last N *completed* ones,
+// in the candles currently on screen — computed fresh from whatever candles are loaded for
+// the selected interval, not from any persisted history, so it reflects exactly what's
+// visible and updates with the interval switcher. A "session" here is a run of
+// same-colored HA candles.
 function computeHeikinAshiSessions(candles, count) {
-  if (candles.length < 2) return []
+  if (candles.length < 2) return { current: null, completed: [] }
   const ha = toHeikinAshi(candles)
   const colorOf = (c) => (c.close >= c.open ? 'up' : 'down')
 
-  const sessions = []
+  const runs = []
   let startIdx = 0
   let dir = colorOf(ha[0])
   for (let i = 1; i < ha.length; i++) {
     const color = colorOf(ha[i])
     if (color !== dir) {
-      sessions.push({ direction: dir, startIdx, endIdx: i - 1 })
+      runs.push({ direction: dir, startIdx, endIdx: i - 1 })
       startIdx = i
       dir = color
     }
   }
+  const currentRun = { direction: dir, startIdx, endIdx: ha.length - 1 }
 
-  return sessions
-    .slice(-count)
-    .reverse()
-    .map((s) => ({
-      direction: s.direction,
-      startTime: candles[s.startIdx].time,
-      endTime: candles[s.endIdx].time,
-      candleCount: s.endIdx - s.startIdx + 1,
-    }))
+  const toSession = (s) => ({
+    direction: s.direction,
+    startTime: candles[s.startIdx].time,
+    endTime: candles[s.endIdx].time,
+    candleCount: s.endIdx - s.startIdx + 1,
+  })
+
+  return {
+    current: toSession(currentRun),
+    completed: runs.slice(-count).reverse().map(toSession),
+  }
 }
 
 export default function AlertChart() {
@@ -160,7 +164,17 @@ export default function AlertChart() {
     [triggerHistory],
   )
 
-  const sessions = useMemo(() => computeHeikinAshiSessions(candles, SESSION_COUNT), [candles])
+  const { current: currentSession, completed: completedSessions } = useMemo(
+    () => computeHeikinAshiSessions(candles, SESSION_COUNT),
+    [candles],
+  )
+
+  // Light background highlight per session (current + completed) — see
+  // lib/trendBandsPrimitive.js. Direction only; TwelveDataChart picks the actual tint.
+  const trendBands = useMemo(() => {
+    const all = currentSession ? [currentSession, ...completedSessions] : completedSessions
+    return all.map((s) => ({ time: s.startTime, endTime: s.endTime, direction: s.direction }))
+  }, [currentSession, completedSessions])
 
   if (!symbol) {
     return <div className="p-6 text-sm text-loss">Missing symbol query parameter.</div>
@@ -174,6 +188,17 @@ export default function AlertChart() {
           {DATA_SOURCE_LABEL[dataSource] ?? dataSource} · alert trigger history
         </p>
       </div>
+
+      {alert && (
+        <div className="mb-3 rounded-md border border-border bg-surface px-3 py-2">
+          <p className="text-xs font-medium text-text-muted">This alert's condition</p>
+          <p className="text-sm text-text">{describeAlert(alert)}</p>
+          <p className="mt-0.5 text-xs text-text-muted">
+            {alert.matchMode === 'any' ? 'Any condition (OR)' : 'All conditions (AND)'} · triggers on{' '}
+            {alert.interval} · notifies {alert.email}
+          </p>
+        </div>
+      )}
 
       {error && <p className="mb-3 text-sm text-loss">{error}</p>}
 
@@ -245,6 +270,7 @@ export default function AlertChart() {
             interval={interval}
             height={showCompare ? 400 : 480}
             markers={markers}
+            trendBands={trendBands}
             onIndicatorDoubleClick={handleIndicatorDoubleClick}
           />
         </div>
@@ -264,15 +290,32 @@ export default function AlertChart() {
 
       <div className="mb-6 rounded-lg border border-border bg-surface p-4">
         <h2 className="mb-1 text-sm font-medium text-text-muted">
-          Last {sessions.length} {INTERVALS.find((i) => i.value === interval)?.label.toLowerCase() ?? interval} sessions
+          {INTERVALS.find((i) => i.value === interval)?.label ?? interval} sessions
         </h2>
         <p className="mb-3 text-xs text-text-muted">
           A "session" here is a run of same-colored Heikin Ashi candles on the currently
           selected timeframe — computed fresh from the candles on screen right now, not
-          from any saved history. Switch timeframe above to recompute.
+          from any saved history. Switch timeframe above to recompute. Highlighted on the
+          chart above in light green (up) / red (down).
         </p>
-        {sessions.length === 0 ? (
-          <p className="text-sm text-text-muted">Not enough candle history loaded yet.</p>
+
+        {currentSession && (
+          <p className="mb-3 text-sm">
+            <span className="font-medium text-text-muted">Current: </span>
+            <span className={currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}>
+              {currentSession.direction === 'up' ? 'Up' : 'Down'}
+            </span>{' '}
+            <span className="text-text-muted">
+              since {new Date(currentSession.startTime * 1000).toLocaleDateString()}{' '}
+              {formatTimeOfDay(currentSession.startTime)} — running{' '}
+              {formatHours((currentSession.endTime - currentSession.startTime) / 3600)} so far (
+              {currentSession.candleCount} candle{currentSession.candleCount === 1 ? '' : 's'}), still open.
+            </span>
+          </p>
+        )}
+
+        {completedSessions.length === 0 ? (
+          <p className="text-sm text-text-muted">Not enough candle history loaded yet for past sessions.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -286,8 +329,8 @@ export default function AlertChart() {
                 </tr>
               </thead>
               <tbody>
-                {sessions.map((s, i) => (
-                  <tr key={i} className="border-t border-border">
+                {completedSessions.map((s, i) => (
+                  <tr key={i} className="border-t border-border even:bg-bg">
                     <td className={`py-2 pr-4 ${s.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
                       {s.direction === 'up' ? 'Up' : 'Down'}
                     </td>
@@ -324,7 +367,7 @@ export default function AlertChart() {
               </thead>
               <tbody>
                 {triggerHistoryNewestFirst.map((t, i) => (
-                  <tr key={i} className="border-t border-border">
+                  <tr key={i} className="border-t border-border even:bg-bg">
                     <td className="py-2 pr-4 text-text">{new Date(t.candleTime * 1000).toLocaleString()}</td>
                     <td className="py-2 text-text-muted">{new Date(t.triggeredAt).toLocaleString()}</td>
                   </tr>

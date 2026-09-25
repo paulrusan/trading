@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { SymbolSearchInput } from '../components/SymbolSearchInput'
 import { useAuth } from '../context/AuthContext'
 import { useApi } from '../hooks/useApi'
+import { describeAlert, INDICATORS } from '../lib/alertDescribe'
 
 const DATA_SOURCES = [
   { value: 'twelvedata', label: 'Twelve Data' },
@@ -13,13 +14,6 @@ const INTERVALS = [
   { value: '4h', label: '4 hour' },
   { value: '1day', label: 'Daily' },
   { value: '1week', label: 'Weekly' },
-]
-const INDICATORS = [
-  { value: 'cci', label: 'CCI', hasLevel: true, defaultPeriod: 14, defaultLevel: 100 },
-  { value: 'rsi', label: 'RSI', hasLevel: true, defaultPeriod: 14, defaultLevel: 70 },
-  { value: 'stoch', label: 'Stochastic %K', hasLevel: true, defaultPeriod: 14, defaultLevel: 80 },
-  { value: 'macd', label: 'MACD histogram crosses 0', hasLevel: false, defaultPeriod: null, defaultLevel: null },
-  { value: 'ema', label: 'Price crosses EMA', hasLevel: false, defaultPeriod: 20, defaultLevel: null },
 ]
 
 // One-click starting points for the multi-timeframe rule validated against real data
@@ -90,26 +84,6 @@ const EMPTY_FORM = {
   conditions: [emptyPriceCondition('1day')],
 }
 
-// Each condition can run against a different interval than the alert's own (e.g. a daily
-// trend condition alongside an hourly trigger condition in the same alert) — shown only
-// when it actually differs, so a plain single-interval alert's description stays terse.
-function describeCondition(condition, alertInterval) {
-  const base =
-    condition.type === 'haColor'
-      ? `Heikin Ashi ${condition.haColor}`
-      : condition.type === 'price'
-        ? `Price crosses ${condition.priceDirection} ${condition.priceLevel}`
-        : (() => {
-            const def = INDICATORS.find((i) => i.value === condition.indicatorKey)
-            const label = def?.label ?? condition.indicatorKey
-            return !def?.hasLevel
-              ? `${label}, ${condition.indicatorDirection}`
-              : `${label}(${condition.indicatorPeriod}) crosses ${condition.indicatorDirection} ${condition.indicatorLevel}`
-          })()
-  const interval = condition.interval ?? alertInterval
-  return interval !== alertInterval ? `${interval} ${base}` : base
-}
-
 function alertChartUrl(alert) {
   const params = new URLSearchParams({
     alertId: alert.id,
@@ -118,12 +92,6 @@ function alertChartUrl(alert) {
     interval: alert.interval,
   })
   return `/alert-chart?${params.toString()}`
-}
-
-function describeAlert(alert) {
-  if (!Array.isArray(alert.conditions)) return '(unrecognized alert format)'
-  const joiner = alert.matchMode === 'any' ? ' OR ' : ' AND '
-  return alert.conditions.map((c) => describeCondition(c, alert.interval)).join(joiner)
 }
 
 function ConditionRow({ condition, onChange, onRemove, canRemove }) {
