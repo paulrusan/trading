@@ -57,6 +57,8 @@ trading-journal/
 │   │   ├── tradePnl.js, dashboardStats.js, format.js, constants.js
 │   │   ├── chartColors.js             # usePrefersDark, getChartColors (literal hex, not CSS vars)
 │   │   ├── indicators.js              # pure indicator math — see below
+│   │   ├── indicatorDefs.js           # INDICATOR_DEFS + computeEnabledIndicators — shared by ChartAnalysis.jsx/AlertChart.jsx
+│   │   ├── tradingViewSymbols.js      # toTradingViewSymbol + TV_INTERVAL/TV_STYLE — shared
 │   │   └── signalLabels.js            # SIGNAL_LABEL/SIGNAL_STYLE/POSITION_LABEL/SIGNAL_MARKER/describeCondition
 │   ├── components/
 │   │   ├── NavBar.jsx, PrivateRoute.jsx, TradeDrawer.jsx, TradeSellModal.jsx
@@ -64,6 +66,8 @@ trading-journal/
 │   │   ├── NotesPanel.jsx, IdeasPanel.jsx  # the two tabs inside /notes (see below)
 │   │   ├── TradingViewWidget.jsx      # embeds TradingView's public tv.js widget
 │   │   ├── TwelveDataChart.jsx        # lightweight-charts render of our own fetched data
+│   │   ├── IndicatorMenu.jsx          # full "Indicators ▾" menu — shared, see below
+│   │   ├── ComparePanel.jsx           # "Compare with TradingView" panel — shared, see below
 │   │   └── SymbolSearchInput.jsx      # debounced symbol search/autocomplete (Watchlist form)
 │   ├── pages/
 │   │   ├── Landing.jsx, Login.jsx, Register.jsx
@@ -73,7 +77,7 @@ trading-journal/
 │   │   ├── Assistant.jsx              # chat grounded in journal data
 │   │   ├── ChartAnalysis.jsx          # chart + indicators + chat grounded in chart data
 │   │   ├── Alerts.jsx                 # create/manage price & indicator email alerts
-│   │   ├── AlertChart.jsx             # /alert-chart — instrument chart + an alert's last 10 firings
+│   │   ├── AlertChart.jsx             # /alert-chart — full chart toolbar + an alert's last 10 firings + trend-session summary
 │   │   ├── Watchlist.jsx              # opt-in hourly snapshot list + latest signal per symbol
 │   │   └── SnapshotDetail.jsx         # /snapshot — chart + trend history for one symbol
 │   ├── App.jsx
@@ -389,6 +393,28 @@ Because a timer trigger is painful to test locally (see `api/README.md`'s
 this project's local dev leaves empty), the exact same check logic is also
 exposed as `POST /api/alerts/run` for on-demand testing, surfaced as a
 "Check now" button on the Alerts page.
+
+**`/alert-chart`** (`AlertChart.jsx`, opened from a "View chart" link per
+alert): a full analysis chart for that alert's instrument, not just the
+trigger-history view it started as — interval switcher (1h/4h/daily/
+weekly, refetches candles), the complete indicator set (`IndicatorMenu`),
+simple/Heikin Ashi candle toggle, and a TradingView "Compare" panel, all
+sharing the exact same components and logic as `ChartAnalysis.jsx`
+(`src/lib/indicatorDefs.js` and `src/lib/tradingViewSymbols.js` hold the
+indicator/TradingView-mapping logic itself; `IndicatorMenu.jsx` and
+`ComparePanel.jsx` hold the shared UI — extracted from `ChartAnalysis.jsx`
+so both pages stay in sync rather than maintaining two copies). On top of
+that, it keeps the alert-specific pieces: amber markers + a table for the
+alert's last 10 firings (`triggerHistory`), and a "last 5 sessions" table
+— the last 5 *completed* Heikin-Ashi-color runs on whatever interval is
+currently selected, with direction, entry date, entry time-of-day (UTC),
+duration, and candle count. That table is computed fresh, client-side,
+from the candles already loaded for the current interval
+(`computeHeikinAshiSessions` in `AlertChart.jsx`) — deliberately not
+reading from any persisted snapshot/trend history, so it reflects exactly
+what's on screen and updates immediately when the interval switcher
+changes, at the cost of not being the same "trade" concept the Watchlist
+below uses (it's pure HA-color-streak duration, no SMA/CCI/SAR involved).
 
 ## Watchlist (`/watchlist`) and the per-symbol snapshot/trend engine
 

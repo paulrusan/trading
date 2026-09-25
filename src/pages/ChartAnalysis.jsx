@@ -1,21 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePrefersDark } from '../lib/chartColors'
 import { useApi } from '../hooks/useApi'
-import { TradingViewWidget } from '../components/TradingViewWidget'
+import { ComparePanel } from '../components/ComparePanel'
+import { IndicatorMenu } from '../components/IndicatorMenu'
 import { TwelveDataChart } from '../components/TwelveDataChart'
-import {
-  computeADX,
-  computeATR,
-  computeBollingerBands,
-  computeCCI,
-  computeEMA,
-  computeMACD,
-  computeParabolicSAR,
-  computeRSI,
-  computeSMA,
-  computeStochastic,
-  toHeikinAshi,
-} from '../lib/indicators'
+import { toHeikinAshi } from '../lib/indicators'
+import { DEFAULT_INDICATOR_STATE, INDICATOR_DEFS, computeEnabledIndicators } from '../lib/indicatorDefs'
+import { toTradingViewSymbol } from '../lib/tradingViewSymbols'
 
 const INTERVALS = [
   { value: '1h', label: '1 hour' },
@@ -32,208 +23,6 @@ const OUTPUT_SIZE_BY_INTERVAL = {
   '4h': 5000,
   '1day': 5000,
   '1week': 5000,
-}
-const TV_INTERVAL = { '1h': '60', '4h': '240', '1day': 'D', '1week': 'W' }
-const TV_STYLE = { simple: 1, heikinAshi: 8 }
-
-// tvOverrideName/tvOverrideKey map to TradingView's `studies_overrides` key format
-// ("<study name>.<input name>"), reverse-engineered from public examples — TradingView
-// doesn't document the free widget's exact input names, so these are best-effort and
-// silently no-op if wrong.
-const INDICATOR_DEFS = [
-  {
-    key: 'ema',
-    label: 'EMA',
-    tvStudy: 'MAExp@tv-basicstudies',
-    tvOverrideName: 'moving average exponential',
-    params: [{ key: 'period', label: 'Period', default: 20, tvOverrideKey: 'length' }],
-  },
-  {
-    key: 'sma',
-    label: 'SMA',
-    tvStudy: 'MASimple@tv-basicstudies',
-    tvOverrideName: 'moving average',
-    params: [{ key: 'period', label: 'Period', default: 50, tvOverrideKey: 'length' }],
-  },
-  {
-    key: 'bb',
-    label: 'Bollinger Bands',
-    tvStudy: 'BB@tv-basicstudies',
-    tvOverrideName: 'bollinger bands',
-    params: [
-      { key: 'period', label: 'Period', default: 20, tvOverrideKey: 'length' },
-      { key: 'stdDev', label: 'StdDev', default: 2 },
-    ],
-  },
-  {
-    key: 'cci',
-    label: 'CCI',
-    tvStudy: 'CCI@tv-basicstudies',
-    tvOverrideName: 'commodity channel index',
-    params: [{ key: 'period', label: 'Period', default: 14, tvOverrideKey: 'length' }],
-  },
-  {
-    key: 'rsi',
-    label: 'RSI',
-    tvStudy: 'RSI@tv-basicstudies',
-    tvOverrideName: 'relative strength index',
-    params: [{ key: 'period', label: 'Period', default: 14, tvOverrideKey: 'length' }],
-  },
-  {
-    key: 'macd',
-    label: 'MACD',
-    tvStudy: 'MACD@tv-basicstudies',
-    tvOverrideName: 'macd',
-    params: [
-      { key: 'fast', label: 'Fast', default: 12, tvOverrideKey: 'fast length' },
-      { key: 'slow', label: 'Slow', default: 26, tvOverrideKey: 'slow length' },
-      { key: 'signal', label: 'Signal', default: 9, tvOverrideKey: 'signal smoothing' },
-    ],
-  },
-  {
-    key: 'atr',
-    label: 'ATR',
-    tvStudy: 'ATR@tv-basicstudies',
-    tvOverrideName: 'average true range',
-    params: [{ key: 'period', label: 'Period', default: 14, tvOverrideKey: 'length' }],
-  },
-  {
-    key: 'stoch',
-    label: 'Stochastic',
-    tvStudy: 'Stochastic@tv-basicstudies',
-    tvOverrideName: 'stochastic',
-    params: [
-      { key: 'kPeriod', label: '%K', default: 14, tvOverrideKey: 'k length' },
-      { key: 'dPeriod', label: '%D', default: 3, tvOverrideKey: 'd length' },
-    ],
-  },
-  {
-    key: 'sar',
-    label: 'Parabolic SAR',
-    tvStudy: 'PSAR@tv-basicstudies',
-    tvOverrideName: 'parabolic sar',
-    params: [
-      { key: 'step', label: 'Step', default: 0.02, tvOverrideKey: 'increment' },
-      { key: 'maxStep', label: 'Max', default: 0.2, tvOverrideKey: 'maximum' },
-    ],
-  },
-  {
-    key: 'adx',
-    label: 'ADX',
-    tvStudy: 'DM@tv-basicstudies', // "Directional Movement" study — plots ADX (+ +DI/-DI)
-    tvOverrideName: 'directional movement',
-    params: [{ key: 'period', label: 'Period', default: 14, tvOverrideKey: 'length' }],
-  },
-]
-const DEFAULT_ENABLED = new Set(['ema', 'cci'])
-
-const DEFAULT_INDICATOR_STATE = Object.fromEntries(
-  INDICATOR_DEFS.map((def) => [
-    def.key,
-    {
-      enabled: DEFAULT_ENABLED.has(def.key),
-      ...Object.fromEntries(def.params.map((p) => [p.key, p.default])),
-    },
-  ]),
-)
-
-// Best-effort Yahoo -> TradingView symbol mapping, same spirit as the studies_overrides
-// mapping above: TradingView's free widget always pulls its OWN live feed for whatever
-// symbol it's given, so this can only point it at the same real-world instrument, not
-// literally replay Yahoo's bars — the two will rarely be pixel-identical. Unmapped
-// symbols (unknown futures roots, indices) return null and the compare panel hides.
-const YAHOO_FUTURES_ROOT_TO_TV = {
-  GC: 'COMEX:GC1!',
-  MGC: 'COMEX_MINI:MGC1!', // Micro Gold
-  SI: 'COMEX:SI1!',
-  SIL: 'COMEX_MINI:SIL1!', // Micro Silver
-  CL: 'NYMEX:CL1!',
-  MCL: 'NYMEX:MCL1!', // Micro Crude Oil
-  NG: 'NYMEX:NG1!',
-  HG: 'COMEX:HG1!',
-  ZC: 'CBOT:ZC1!',
-  ZS: 'CBOT:ZS1!',
-  ZW: 'CBOT:ZW1!',
-  ES: 'CME:ES1!',
-  MES: 'CME_MINI:MES1!', // Micro E-mini S&P 500
-  NQ: 'CME:NQ1!',
-  MNQ: 'CME_MINI:MNQ1!', // Micro E-mini Nasdaq-100
-  YM: 'CBOT:YM1!',
-  MYM: 'CBOT_MINI:MYM1!', // Micro E-mini Dow
-}
-const YAHOO_INDEX_TO_TV = {
-  '^GSPC': 'SP:SPX',
-  '^DJI': 'DJ:DJI',
-  '^IXIC': 'NASDAQ:IXIC',
-  '^RUT': 'TVC:RUT',
-  '^VIX': 'TVC:VIX',
-}
-
-function yahooToTradingViewSymbol(symbol) {
-  if (!symbol) return null
-  if (YAHOO_INDEX_TO_TV[symbol]) return YAHOO_INDEX_TO_TV[symbol]
-  if (symbol.startsWith('^')) return null
-  if (symbol.endsWith('=F')) return YAHOO_FUTURES_ROOT_TO_TV[symbol.slice(0, -2)] ?? null
-  if (symbol.endsWith('=X')) return `FX:${symbol.slice(0, -2)}`
-  if (symbol.endsWith('-USD')) return symbol.replace('-', '')
-  return symbol // plain equity/ETF ticker — TradingView's widget resolves bare tickers fine
-}
-
-function toTradingViewSymbol(symbol, dataSource) {
-  if (!symbol) return null
-  return dataSource === 'yahoo' ? yahooToTradingViewSymbol(symbol) : symbol.replace('/', '')
-}
-
-function computeEnabledIndicators(candles, settings) {
-  const data = {}
-  if (settings.ema.enabled) {
-    data.ema = { period: settings.ema.period, points: computeEMA(candles, settings.ema.period) }
-  }
-  if (settings.sma.enabled) {
-    data.sma = { period: settings.sma.period, points: computeSMA(candles, settings.sma.period) }
-  }
-  if (settings.bb.enabled) {
-    data.bb = {
-      period: settings.bb.period,
-      stdDev: settings.bb.stdDev,
-      ...computeBollingerBands(candles, settings.bb.period, settings.bb.stdDev),
-    }
-  }
-  if (settings.cci.enabled) {
-    data.cci = { period: settings.cci.period, points: computeCCI(candles, settings.cci.period) }
-  }
-  if (settings.rsi.enabled) {
-    data.rsi = { period: settings.rsi.period, points: computeRSI(candles, settings.rsi.period) }
-  }
-  if (settings.macd.enabled) {
-    data.macd = {
-      fast: settings.macd.fast,
-      slow: settings.macd.slow,
-      signal: settings.macd.signal,
-      ...computeMACD(candles, settings.macd.fast, settings.macd.slow, settings.macd.signal),
-    }
-  }
-  if (settings.atr.enabled) {
-    data.atr = { period: settings.atr.period, points: computeATR(candles, settings.atr.period) }
-  }
-  if (settings.stoch.enabled) {
-    data.stoch = {
-      kPeriod: settings.stoch.kPeriod,
-      dPeriod: settings.stoch.dPeriod,
-      ...computeStochastic(candles, settings.stoch.kPeriod, settings.stoch.dPeriod),
-    }
-  }
-  if (settings.sar.enabled) {
-    data.sar = {
-      step: settings.sar.step,
-      maxStep: settings.sar.maxStep,
-      points: computeParabolicSAR(candles, settings.sar.step, settings.sar.maxStep),
-    }
-  }
-  if (settings.adx.enabled) {
-    data.adx = { period: settings.adx.period, points: computeADX(candles, settings.adx.period) }
-  }
-  return data
 }
 
 function last(points) {
@@ -257,8 +46,7 @@ export default function ChartAnalysis() {
 
   const [candleType, setCandleType] = useState('heikinAshi')
   const [indicatorSettings, setIndicatorSettings] = useState(DEFAULT_INDICATOR_STATE)
-  const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false)
-  const [openSettingsKey, setOpenSettingsKey] = useState(null)
+  const [indicatorOpenRequest, setIndicatorOpenRequest] = useState(null)
   const [showCompare, setShowCompare] = useState(false)
 
   const [messages, setMessages] = useState([])
@@ -266,7 +54,6 @@ export default function ChartAnalysis() {
   const [sending, setSending] = useState(false)
   const [chatError, setChatError] = useState('')
 
-  const indicatorMenuRef = useRef(null)
   const symbolSearchRef = useRef(null)
   const symbolInputRef = useRef(null)
 
@@ -274,18 +61,6 @@ export default function ChartAnalysis() {
     () => computeEnabledIndicators(candles, indicatorSettings),
     [candles, indicatorSettings],
   )
-
-  useEffect(() => {
-    if (!indicatorMenuOpen) return
-    const handleClickOutside = (e) => {
-      if (indicatorMenuRef.current && !indicatorMenuRef.current.contains(e.target)) {
-        setIndicatorMenuOpen(false)
-        setOpenSettingsKey(null)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [indicatorMenuOpen])
 
   useEffect(() => {
     if (!symbolSearchOpen) return
@@ -351,10 +126,9 @@ export default function ChartAnalysis() {
     })
   }
 
-  const handleIndicatorDoubleClick = useCallback((key) => {
-    setIndicatorMenuOpen(true)
-    setOpenSettingsKey(key)
-  }, [])
+  const handleIndicatorDoubleClick = (key) => {
+    setIndicatorOpenRequest({ key, token: Date.now() })
+  }
 
   const loadChart = async (e, overrideInterval, overrideSymbol, overrideSource) => {
     e?.preventDefault()
@@ -599,103 +373,13 @@ export default function ChartAnalysis() {
           </button>
         </div>
 
-        <div ref={indicatorMenuRef} className="relative">
-          <button
-            type="button"
-            onClick={() => setIndicatorMenuOpen((v) => !v)}
-            className="rounded border border-border px-2 py-1 text-xs text-text-muted hover:text-text"
-          >
-            Indicators ▾
-          </button>
-          {indicatorMenuOpen && (
-            <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-border bg-surface p-2 shadow-lg">
-              {INDICATOR_DEFS.map((def) => {
-                const st = indicatorSettings[def.key]
-                const isSettingsOpen = openSettingsKey === def.key
-                return (
-                  <div key={def.key} className="border-b border-border py-1 last:border-0">
-                    <div className="flex items-center justify-between gap-1">
-                      <label className="flex flex-1 cursor-pointer items-center gap-1.5 text-xs text-text-muted hover:text-text">
-                        <input
-                          type="checkbox"
-                          checked={st.enabled}
-                          onChange={() => toggleIndicator(def.key)}
-                          className="accent-accent"
-                        />
-                        {def.label}
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setOpenSettingsKey(isSettingsOpen ? null : def.key)}
-                        title={`${def.label} settings`}
-                        aria-label={`${def.label} settings`}
-                        className="text-text-muted hover:text-text"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-3.5 w-3.5"
-                        >
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                        </svg>
-                      </button>
-                    </div>
-                    {isSettingsOpen && (
-                      <div className="mt-1 flex flex-wrap gap-2 pl-5">
-                        {def.params.map((p) => (
-                          <label key={p.key} className="flex items-center gap-1 text-[11px] text-text-muted">
-                            {p.label}
-                            <input
-                              type="number"
-                              value={st[p.key]}
-                              onChange={(e) => updateIndicatorParam(def.key, p.key, Number(e.target.value))}
-                              className="w-12 rounded border border-border bg-bg px-1 py-0.5 text-text outline-none focus:border-accent"
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-              <p className="mt-1 px-1 text-[10px] text-text-muted">
-                Periods here always drive Claude's analysis. The TradingView chart mirrors them on a
-                best-effort basis, since its free widget doesn't officially document these settings.
-              </p>
-            </div>
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={clearIndicators}
-          title="Clear all indicators"
-          aria-label="Clear all indicators"
-          className="rounded border border-border p-1.5 text-text-muted hover:text-loss"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-3.5 w-3.5"
-          >
-            <path d="M3 6h18" />
-            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-          </svg>
-        </button>
+        <IndicatorMenu
+          settings={indicatorSettings}
+          onToggle={toggleIndicator}
+          onUpdateParam={updateIndicatorParam}
+          onClear={clearIndicators}
+          openRequest={indicatorOpenRequest}
+        />
 
         <button
           type="button"
@@ -728,33 +412,17 @@ export default function ChartAnalysis() {
         )}
       </div>
 
-      {showCompare && candles.length > 0 && (
-        <div className="mb-6">
-          {tvSymbol ? (
-            <>
-              <p className="mb-2 text-xs text-text-muted">
-                TradingView's own live feed for <span className="font-medium text-text">{tvSymbol}</span>,
-                shown for visual reference.
-                {dataSource === 'yahoo' &&
-                  ' Yahoo symbols are best-effort mapped to a TradingView symbol, so this may come from a different exchange/contract than the exact data Claude analyzes above.'}
-              </p>
-              <TradingViewWidget
-                symbol={tvSymbol}
-                interval={TV_INTERVAL[interval] ?? 'D'}
-                style={TV_STYLE[candleType] ?? 1}
-                studies={studies}
-                studiesOverrides={studiesOverrides}
-                theme={isDark ? 'dark' : 'light'}
-                height={400}
-              />
-            </>
-          ) : (
-            <div className="flex h-[400px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-text-muted">
-              TradingView doesn't have a known symbol mapping for {activeSymbol}.
-            </div>
-          )}
-        </div>
-      )}
+      <ComparePanel
+        show={showCompare && candles.length > 0}
+        tvSymbol={tvSymbol}
+        appInterval={interval}
+        candleType={candleType}
+        studies={studies}
+        studiesOverrides={studiesOverrides}
+        isDark={isDark}
+        activeSymbol={activeSymbol}
+        dataSource={dataSource}
+      />
 
       <div className="rounded-lg border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium text-text-muted">Ask Claude about this chart</h2>
