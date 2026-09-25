@@ -84,8 +84,8 @@ into a `Map<interval, candles>`, evaluates each alert's conditions
 (`src/evaluateAlert.js`, each condition resolving its own interval's
 candles from that map; indicator math ported to `src/lib/indicators.js` —
 an exact copy of the frontend's `src/lib/indicators.js`, since those
-functions are pure with no browser dependencies), and emails via Gmail
-SMTP on a **crossing** (edge-triggered: fires once when the AND/OR-combined
+functions are pure with no browser dependencies), and emails via SendGrid
+on a **crossing** (edge-triggered: fires once when the AND/OR-combined
 condition state transitions from not-met to met, using the last two
 candles/indicator points per condition — not every hour it stays true).
 Which bar most recently triggered an alert is tracked via
@@ -107,11 +107,15 @@ return of the triggers it keeps, and the ones it rejects average a
 *negative* forward return (i.e. it's actually separating real bounces from
 fake ones, not just shrinking the sample).
 
-**Email**: `src/sendEmail.js` sends via Gmail SMTP using `nodemailer`
-(`service: 'gmail'`). Needs two app settings: `GMAIL_USER` (the Gmail
-address) and `GMAIL_APP_PASSWORD` (a 16-character App Password generated at
-myaccount.google.com/apppasswords — this requires 2-Step Verification to be
-enabled on the account; a regular account password will not work).
+**Email**: `src/sendEmail.js` sends via SendGrid's v3 Mail Send API using
+plain `fetch` (no SDK). Needs two app settings: `SENDGRID_API_KEY` and
+`SENDGRID_FROM_EMAIL` (must be a verified sender in the SendGrid account —
+Single Sender Verification or full domain authentication; SendGrid will
+reject the send otherwise). This app used SendGrid originally, switched to
+Gmail SMTP via `nodemailer` mid-project, then switched back after finding
+the Gmail sending mailbox was a Google Workspace account with SMTP
+AUTH/App Passwords blocked by org policy (server-side, unfixable by
+regenerating credentials).
 
 **Local dev limitation**: the timer trigger's listener requires a real
 `AzureWebJobsStorage` connection (it tracks its own schedule state in a
@@ -194,9 +198,9 @@ and also exposes a manual "Backfill history" button.
      accounts → Generate new private key). Keep the `\n` escapes in the
      private key as-is; the code unescapes them at runtime.
    - `TWELVE_DATA_API_KEY` — from twelvedata.com (free tier)
-   - `GMAIL_USER` — the Gmail address alerts are sent from
-   - `GMAIL_APP_PASSWORD` — a Google App Password (myaccount.google.com/apppasswords),
-     not the account's regular password; requires 2-Step Verification enabled
+   - `SENDGRID_API_KEY` — from a SendGrid account (Settings → API Keys)
+   - `SENDGRID_FROM_EMAIL` — must be a verified sender in that SendGrid
+     account (Settings → Sender Authentication), or sends will be rejected
 4. `npm start` (runs `func start`) — API available at `http://localhost:7071/api/...`
 
 Do **not** set `FUNCTIONS_WORKER_RUNTIME` — Flex Consumption manages the
