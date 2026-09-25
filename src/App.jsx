@@ -14,7 +14,6 @@ import Register from './pages/Register'
 import Settings from './pages/Settings'
 import SnapshotDetail from './pages/SnapshotDetail'
 import Trades from './pages/Trades'
-import Watchlist from './pages/Watchlist'
 
 function App() {
   return (
@@ -86,14 +85,6 @@ function App() {
             element={
               <PrivateRoute>
                 <AlertChart />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/watchlist"
-            element={
-              <PrivateRoute>
-                <Watchlist />
               </PrivateRoute>
             }
           />
