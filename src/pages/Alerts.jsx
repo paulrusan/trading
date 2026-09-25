@@ -4,6 +4,7 @@ import { SymbolSearchInput } from '../components/SymbolSearchInput'
 import { useAuth } from '../context/AuthContext'
 import { useApi } from '../hooks/useApi'
 import { describeAlert, INDICATORS } from '../lib/alertDescribe'
+import { formatDateTime } from '../lib/formatDate'
 
 const DATA_SOURCES = [
   { value: 'twelvedata', label: 'Twelve Data' },
@@ -82,6 +83,18 @@ const EMPTY_FORM = {
   interval: '1day',
   matchMode: 'all',
   conditions: [emptyPriceCondition('1day')],
+}
+
+// Converts a saved alert back into the modal's editable form shape.
+function alertToFormState(alert) {
+  return {
+    symbol: alert.symbol,
+    dataSource: alert.dataSource,
+    interval: alert.interval,
+    matchMode: alert.matchMode ?? 'all',
+    conditions: alert.conditions.map((c) => ({ ...c })),
+    email: alert.email ?? '',
+  }
 }
 
 function alertChartUrl(alert) {
@@ -217,31 +230,10 @@ function ConditionRow({ condition, onChange, onRemove, canRemove }) {
   )
 }
 
-export default function Alerts() {
-  const { user } = useAuth()
-  const api = useApi()
-
-  const [alerts, setAlerts] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [form, setForm] = useState({ ...EMPTY_FORM, email: user?.email ?? '' })
+function AlertFormModal({ initialForm, isEdit, onClose, onSubmit }) {
+  const [form, setForm] = useState(initialForm)
   const [submitting, setSubmitting] = useState(false)
-  const [runStatus, setRunStatus] = useState('')
-  const [running, setRunning] = useState(false)
-
-  const loadAlerts = () => {
-    setLoading(true)
-    api
-      .getAlerts()
-      .then(setAlerts)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => {
-    loadAlerts()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const [error, setError] = useState('')
 
   const updateField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }))
 
@@ -276,34 +268,29 @@ export default function Alerts() {
     setError('')
     setSubmitting(true)
     try {
-      const payload = {
+      const conditions = form.conditions.map((c) =>
+        c.type === 'haColor'
+          ? { type: 'haColor', haColor: c.haColor, interval: c.interval }
+          : c.type === 'price'
+            ? { type: 'price', priceLevel: Number(c.priceLevel), priceDirection: c.priceDirection, interval: c.interval }
+            : {
+                type: 'indicator',
+                indicatorKey: c.indicatorKey,
+                indicatorPeriod: numberOrUndefined(c.indicatorPeriod),
+                indicatorLevel: numberOrUndefined(c.indicatorLevel),
+                indicatorDirection: c.indicatorDirection,
+                interval: c.interval,
+              },
+      )
+      await onSubmit({
         symbol: form.symbol.trim(),
         dataSource: form.dataSource,
         interval: form.interval,
         matchMode: form.matchMode,
-        conditions: form.conditions.map((c) =>
-          c.type === 'haColor'
-            ? { type: 'haColor', haColor: c.haColor, interval: c.interval }
-            : c.type === 'price'
-              ? { type: 'price', priceLevel: Number(c.priceLevel), priceDirection: c.priceDirection, interval: c.interval }
-              : {
-                  type: 'indicator',
-                  indicatorKey: c.indicatorKey,
-                  indicatorPeriod: numberOrUndefined(c.indicatorPeriod),
-                  indicatorLevel: numberOrUndefined(c.indicatorLevel),
-                  indicatorDirection: c.indicatorDirection,
-                  interval: c.interval,
-                },
-        ),
+        conditions,
         email: form.email,
-        active: true,
-        createdAt: new Date().toISOString(),
-        lastTriggeredAt: null,
-        lastTriggeredCandleTime: null,
-      }
-      await api.saveAlert(payload)
-      setForm({ ...EMPTY_FORM, email: user?.email ?? '' })
-      loadAlerts()
+      })
+      onClose()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -311,59 +298,19 @@ export default function Alerts() {
     }
   }
 
-  const toggleActive = async (alert) => {
-    try {
-      await api.saveAlert({ ...alert, active: !alert.active })
-      loadAlerts()
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this alert?')) return
-    try {
-      await api.deleteAlert(id)
-      loadAlerts()
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  const handleRunNow = async () => {
-    setRunning(true)
-    setRunStatus('')
-    try {
-      const summary = await api.runAlertsCheck()
-      setRunStatus(
-        `Checked ${summary.checked} alert(s) across ${summary.groups} symbol(s) — ${summary.triggered} triggered, ${summary.failed} failed.`,
-      )
-      loadAlerts()
-    } catch (err) {
-      setRunStatus(err.message)
-    } finally {
-      setRunning(false)
-    }
-  }
-
   return (
-    <div className="mx-auto max-w-3xl p-4 sm:p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-text">Alerts</h1>
-        <button
-          type="button"
-          onClick={handleRunNow}
-          disabled={running}
-          className="rounded-md border border-border px-3 py-1.5 text-sm text-text-muted hover:text-text disabled:opacity-50"
-        >
-          {running ? 'Checking…' : 'Check now'}
-        </button>
-      </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-surface p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-text">{isEdit ? 'Edit alert' : 'Create alert'}</h2>
+          <button type="button" onClick={onClose} className="text-text-muted hover:text-text">
+            ✕
+          </button>
+        </div>
 
-      {runStatus && <p className="mb-4 text-sm text-text-muted">{runStatus}</p>}
-
-      <div className="mb-6 rounded-lg border border-border bg-surface p-4">
-        <h2 className="mb-3 text-sm font-medium text-text-muted">New alert</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-3">
             <SymbolSearchInput
@@ -471,15 +418,129 @@ export default function Alerts() {
 
           {error && <p className="text-sm text-loss">{error}</p>}
 
-          <button
-            type="submit"
-            disabled={submitting || !form.symbol.trim() || !form.email}
-            className="w-fit rounded-md bg-accent px-4 py-2 font-medium text-white hover:opacity-90 disabled:opacity-50"
-          >
-            {submitting ? 'Saving…' : 'Create alert'}
-          </button>
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-md border border-border px-3 py-2 text-text hover:bg-bg"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || !form.symbol.trim() || !form.email}
+              className="flex-1 rounded-md bg-accent px-4 py-2 font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create alert'}
+            </button>
+          </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+export default function Alerts() {
+  const { user } = useAuth()
+  const api = useApi()
+
+  const [alerts, setAlerts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [runStatus, setRunStatus] = useState('')
+  const [running, setRunning] = useState(false)
+  const [modalTarget, setModalTarget] = useState(null) // null = closed, 'new', or an alert object
+
+  const loadAlerts = () => {
+    setLoading(true)
+    api
+      .getAlerts()
+      .then(setAlerts)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    loadAlerts()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleCreate = async (fields) => {
+    await api.saveAlert({
+      ...fields,
+      active: true,
+      createdAt: new Date().toISOString(),
+      lastTriggeredAt: null,
+      lastTriggeredCandleTime: null,
+    })
+    loadAlerts()
+  }
+
+  const handleEdit = async (fields) => {
+    await api.saveAlert({ ...modalTarget, ...fields })
+    loadAlerts()
+  }
+
+  const toggleActive = async (alert) => {
+    try {
+      await api.saveAlert({ ...alert, active: !alert.active })
+      loadAlerts()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this alert?')) return
+    try {
+      await api.deleteAlert(id)
+      loadAlerts()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const handleRunNow = async () => {
+    setRunning(true)
+    setRunStatus('')
+    try {
+      const summary = await api.runAlertsCheck()
+      setRunStatus(
+        `Checked ${summary.checked} alert(s) across ${summary.groups} symbol(s) — ${summary.triggered} triggered, ${summary.failed} failed.`,
+      )
+      loadAlerts()
+    } catch (err) {
+      setRunStatus(err.message)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl p-4 sm:p-6">
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-xl font-semibold text-text">Alerts</h1>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleRunNow}
+            disabled={running}
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-text-muted hover:text-text disabled:opacity-50"
+          >
+            {running ? 'Checking…' : 'Check now'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setModalTarget('new')}
+            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+          >
+            + Create alert
+          </button>
+        </div>
+      </div>
+
+      {runStatus && <p className="mb-4 text-sm text-text-muted">{runStatus}</p>}
+      {error && <p className="mb-4 text-sm text-loss">{error}</p>}
 
       <div className="rounded-lg border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium text-text-muted">Your alerts</h2>
@@ -503,7 +564,7 @@ export default function Alerts() {
                 <p className="text-xs text-text-muted">{describeAlert(alert)}</p>
                 {alert.lastTriggeredAt && (
                   <p className="text-xs text-text-muted">
-                    Last triggered {new Date(alert.lastTriggeredAt).toLocaleString()}
+                    Last triggered {formatDateTime(alert.lastTriggeredAt)}
                   </p>
                 )}
               </div>
@@ -516,6 +577,13 @@ export default function Alerts() {
                 >
                   View chart
                 </Link>
+                <button
+                  type="button"
+                  onClick={() => setModalTarget(alert)}
+                  className="rounded border border-border px-2 py-1 text-xs text-text-muted hover:text-text"
+                >
+                  Edit
+                </button>
                 <button
                   type="button"
                   onClick={() => toggleActive(alert)}
@@ -537,6 +605,18 @@ export default function Alerts() {
           ))}
         </div>
       </div>
+
+      {modalTarget && (
+        <AlertFormModal
+          key={modalTarget === 'new' ? 'new' : modalTarget.id}
+          initialForm={
+            modalTarget === 'new' ? { ...EMPTY_FORM, email: user?.email ?? '' } : alertToFormState(modalTarget)
+          }
+          isEdit={modalTarget !== 'new'}
+          onClose={() => setModalTarget(null)}
+          onSubmit={modalTarget === 'new' ? handleCreate : handleEdit}
+        />
+      )}
     </div>
   )
 }
