@@ -40,13 +40,17 @@ function formatHours(hours) {
   return `${(hours / 24).toFixed(1)}d`
 }
 
+// Viewer's local timezone (no `timeZone` override), not UTC — matches the "Entry (date)"
+// column next to it, which was already local via the no-argument toLocaleDateString calls
+// below. `timeZoneName: 'short'` labels which zone that actually is, since it's no longer
+// a fixed, always-the-same "UTC" suffix.
 function formatTimeOfDay(unixSeconds) {
-  return `${new Date(unixSeconds * 1000).toLocaleTimeString('en-US', {
+  return new Date(unixSeconds * 1000).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-    timeZone: 'UTC',
-  })} UTC`
+    timeZoneName: 'short',
+  })
 }
 
 // The current (still-open) CCI-sign run, plus the last N *completed* ones, in the candles
