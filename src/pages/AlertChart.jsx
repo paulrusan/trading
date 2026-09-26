@@ -347,24 +347,38 @@ export default function AlertChart() {
               </thead>
               <tbody>
                 {currentSession && (
-                  <tr
-                    className="border-t border-border text-base sm:text-lg"
-                    style={{ backgroundColor: withAlpha(currentSession.direction === 'up' ? colors.profit : colors.loss, 0.08) }}
-                  >
-                    <td className={`py-2 pr-4 font-semibold ${currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
-                      {currentSession.direction === 'up' ? 'Up' : 'Down'}
+                  <>
+                    <tr className="border-t border-border">
+                      <td colSpan={5} className="pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-text-muted">
+                        Current
+                      </td>
+                    </tr>
+                    <tr
+                      className="text-base sm:text-lg"
+                      style={{ backgroundColor: withAlpha(currentSession.direction === 'up' ? colors.profit : colors.loss, 0.08) }}
+                    >
+                      <td className={`py-2 pr-4 font-semibold ${currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
+                        {currentSession.direction === 'up' ? 'Up' : 'Down'}
+                      </td>
+                      <td className="py-2 pr-4 text-text-muted">
+                        {formatDate(currentSession.startTime * 1000)}
+                      </td>
+                      <td className="py-2 pr-4 text-text-muted">{formatTimeOfDay(currentSession.startTime)}</td>
+                      <td className="py-2 pr-4 text-text">
+                        {formatHours((currentSession.endTime - currentSession.startTime) / 3600)} so far{' '}
+                        <span className={`font-semibold ${currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
+                          (still open)
+                        </span>
+                      </td>
+                      <td className="py-2 text-text-muted">{currentSession.candleCount}</td>
+                    </tr>
+                  </>
+                )}
+                {completedSessions.length > 0 && (
+                  <tr className="border-t border-border">
+                    <td colSpan={5} className="pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-text-muted">
+                      Past sessions
                     </td>
-                    <td className="py-2 pr-4 text-text-muted">
-                      {formatDate(currentSession.startTime * 1000)}
-                    </td>
-                    <td className="py-2 pr-4 text-text-muted">{formatTimeOfDay(currentSession.startTime)}</td>
-                    <td className="py-2 pr-4 text-text">
-                      {formatHours((currentSession.endTime - currentSession.startTime) / 3600)} so far{' '}
-                      <span className={`font-semibold ${currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
-                        (still open)
-                      </span>
-                    </td>
-                    <td className="py-2 text-text-muted">{currentSession.candleCount}</td>
                   </tr>
                 )}
                 {completedSessions.map((s, i) => (
