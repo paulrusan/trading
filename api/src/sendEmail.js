@@ -30,7 +30,7 @@ function sleep(ms) {
 // A transient Gmail/SMTP hiccup at exactly the wrong moment is the leading suspect for
 // alerts that reconstruct as "should have fired" but never emailed (see CLAUDE.md's
 // "Alerts" section), so this retries a few times before actually giving up.
-export async function sendAlertEmail({ to, subject, text }) {
+export async function sendAlertEmail({ to, subject, text, html, attachments }) {
   const user = process.env.GMAIL_USER
   const t = getTransporter()
 
@@ -42,6 +42,8 @@ export async function sendAlertEmail({ to, subject, text }) {
         to,
         subject,
         text,
+        html,
+        attachments,
       })
       return
     } catch (err) {

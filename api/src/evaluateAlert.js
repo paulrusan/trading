@@ -36,6 +36,7 @@ function evaluateCondition(condition, candles) {
       prevMet: prev === condition.haColor,
       currMet: curr === condition.haColor,
       label: `Heikin Ashi ${condition.haColor} (now ${curr})`,
+      value: null,
     }
   }
 
@@ -46,6 +47,7 @@ function evaluateCondition(condition, candles) {
       prevMet: isAbove(condition.priceDirection, prev.close, condition.priceLevel),
       currMet: isAbove(condition.priceDirection, curr.close, condition.priceLevel),
       label: `price ${condition.priceDirection} ${condition.priceLevel} (now ${curr.close})`,
+      value: curr.close,
     }
   }
 
@@ -58,6 +60,7 @@ function evaluateCondition(condition, candles) {
       prevMet: isAbove(condition.indicatorDirection, aligned.prev.value, condition.indicatorLevel),
       currMet: isAbove(condition.indicatorDirection, aligned.curr.value, condition.indicatorLevel),
       label: `CCI(${period}) ${condition.indicatorDirection} ${condition.indicatorLevel} (now ${aligned.curr.value.toFixed(2)})`,
+      value: aligned.curr.value,
     }
   }
 
@@ -68,6 +71,7 @@ function evaluateCondition(condition, candles) {
       prevMet: isAbove(condition.indicatorDirection, aligned.prev.value, condition.indicatorLevel),
       currMet: isAbove(condition.indicatorDirection, aligned.curr.value, condition.indicatorLevel),
       label: `RSI(${period}) ${condition.indicatorDirection} ${condition.indicatorLevel} (now ${aligned.curr.value.toFixed(2)})`,
+      value: aligned.curr.value,
     }
   }
 
@@ -79,6 +83,7 @@ function evaluateCondition(condition, candles) {
       prevMet: isAbove(condition.indicatorDirection, aligned.prev.value, condition.indicatorLevel),
       currMet: isAbove(condition.indicatorDirection, aligned.curr.value, condition.indicatorLevel),
       label: `Stochastic %K(${period}) ${condition.indicatorDirection} ${condition.indicatorLevel} (now ${aligned.curr.value.toFixed(2)})`,
+      value: aligned.curr.value,
     }
   }
 
@@ -90,6 +95,7 @@ function evaluateCondition(condition, candles) {
       prevMet: isAbove(condition.indicatorDirection, aligned.prev.value, 0),
       currMet: isAbove(condition.indicatorDirection, aligned.curr.value, 0),
       label: `MACD histogram ${condition.indicatorDirection === 'above' ? 'bullish' : 'bearish'} (now ${aligned.curr.value.toFixed(4)})`,
+      value: aligned.curr.value,
     }
   }
 
@@ -102,6 +108,7 @@ function evaluateCondition(condition, candles) {
       prevMet: condition.indicatorDirection === 'above' ? prevDiff > 0 : prevDiff < 0,
       currMet: condition.indicatorDirection === 'above' ? currDiff > 0 : currDiff < 0,
       label: `price ${condition.indicatorDirection} its EMA(${period}) (price ${aligned.curr.candle.close}, EMA ${aligned.curr.value.toFixed(2)})`,
+      value: currDiff,
     }
   }
 
@@ -145,5 +152,21 @@ export function evaluateAlert(alert, candlesByInterval) {
     triggered: !combine('prevMet') && combine('currMet'),
     candleTime: curr.time,
     message: `${alert.symbol}: ${alert.conditions.map((c, i) => labelFor(c, results[i])).join(matchAny ? ' OR ' : ' AND ')}`,
+    // Structured per-condition detail (interval/type/period/direction/level/value), aligned
+    // to alert.conditions — lets the email builder (alertsEngine.js) present a readable
+    // breakdown and pull out real numbers for the trend-summary graphic, instead of
+    // re-parsing `message`.
+    details: alert.conditions.map((c, i) => ({
+      interval: c.interval ?? alert.interval,
+      type: c.type,
+      indicatorKey: c.indicatorKey,
+      indicatorPeriod: c.indicatorPeriod,
+      indicatorDirection: c.indicatorDirection,
+      indicatorLevel: c.indicatorLevel,
+      priceDirection: c.priceDirection,
+      priceLevel: c.priceLevel,
+      haColor: c.haColor,
+      value: results[i].value,
+    })),
   }
 }

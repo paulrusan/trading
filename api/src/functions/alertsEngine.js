@@ -1,9 +1,37 @@
 import { app } from '@azure/functions'
+import sharp from 'sharp'
 import { getContainer } from '../cosmosClient.js'
+import { buildAlertChartSvg, buildAlertEmailText } from '../emailChart.js'
 import { evaluateAlert } from '../evaluateAlert.js'
 import { fetchCandles } from '../marketDataFetchers.js'
 import { sendAlertEmail } from '../sendEmail.js'
 import { verifyAuth } from '../verifyAuth.js'
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// Builds the HTML body (readable per-condition text + the two-panel trend graphic, when
+// this alert's conditions are the shape emailChart.js knows how to draw) and the inline
+// cid attachment for it. Falls back to text-only (no graphic) for condition combos outside
+// that shape, rather than guessing at a layout.
+async function buildEmailContent(alert, result) {
+  const text = buildAlertEmailText(alert, result)
+  const svg = buildAlertChartSvg(alert, result)
+
+  if (!svg) {
+    return { text, html: `<pre style="font-family:Arial,sans-serif;white-space:pre-wrap;">${escapeHtml(text)}</pre>`, attachments: [] }
+  }
+
+  const png = await sharp(Buffer.from(svg)).png().toBuffer()
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#1e293b;font-size:14px;line-height:1.5;">
+      <img src="cid:trendChart" width="600" height="270" alt="Trend chart" style="max-width:100%;height:auto;display:block;margin-bottom:16px;"/>
+      <pre style="font-family:Arial,sans-serif;white-space:pre-wrap;margin:0;">${escapeHtml(text)}</pre>
+    </div>
+  `
+  return { text, html, attachments: [{ filename: 'trend-chart.png', content: png, cid: 'trendChart' }] }
+}
 
 const OUTPUT_SIZE_BY_INTERVAL = { '1h': 200, '4h': 200, '1day': 200, '1week': 200 }
 
@@ -111,10 +139,13 @@ async function runAlertsCheckInner(log) {
 
       const triggeredAt = new Date().toISOString()
       try {
+        const { text, html, attachments } = await buildEmailContent(alert, result)
         await sendAlertEmail({
           to: alert.email,
           subject: `Trading Journal alert: ${alert.symbol}`,
-          text: result.message,
+          text,
+          html,
+          attachments,
         })
         await container.items.upsert({
           ...alert,
