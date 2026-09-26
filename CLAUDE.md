@@ -414,6 +414,25 @@ page ("Hourly check last ran…", flagged red past 75 minutes) — so the
 next time something like this happens, the actual error is visible from
 the app itself instead of requiring Azure Portal archaeology.
 
+**Root cause found (2026-09-26):** the heartbeat's `summary.failures[]`
+(added right after the above — `alertId`/`symbol`/`dataSource`/`stage`/
+`message` per failure, not just a count) immediately caught it on the
+very next failure: Twelve Data's free tier caps at **8 API credits/minute**,
+and a single hourly run can need up to 10 calls (5 active Twelve Data
+symbols × up to 2 intervals each — daily trend condition + 1h trigger
+condition), fired back-to-back with zero spacing —
+`"You have run out of API credits for the current minute"` on both
+XAU/USD and BTC/USD in the same run. This explains the whole pattern:
+USD/CAD, XAU/USD, and BTC/USD are all Twelve Data; SI=F (the one
+exception) is Yahoo, a separate provider with its own, still-unexplained
+one-off. Fix: `fetchFromTwelveData` (`api/src/marketDataFetchers.js`)
+now retries once after waiting 61s when it hits this specific error
+message (there's no dedicated rate-limit status code to check), instead
+of failing that symbol's alerts outright. If this keeps happening as
+more Twelve Data alerts get added, the real fix is spacing/throttling
+calls proactively within a run rather than retrying reactively — this
+retry buys headroom, it doesn't remove the underlying ceiling.
+
 Because a timer trigger is painful to test locally (see `api/README.md`'s
 "Local dev limitation" note — it needs a real `AzureWebJobsStorage`, which
 this project's local dev leaves empty), the exact same check logic is also
