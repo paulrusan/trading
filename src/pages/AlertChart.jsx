@@ -331,22 +331,7 @@ export default function AlertChart() {
           {indicatorSettings.cci.period})
         </h2>
 
-        {currentSession && (
-          <p className="mb-4 text-base sm:text-lg">
-            <span className="font-medium text-text-muted">Current: </span>
-            <span className={`font-semibold ${currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
-              {currentSession.direction === 'up' ? 'Up' : 'Down'}
-            </span>{' '}
-            <span className="text-sm text-text-muted sm:text-base">
-              since {formatDate(currentSession.startTime * 1000)}{' '}
-              {formatTimeOfDay(currentSession.startTime)} — running{' '}
-              {formatHours((currentSession.endTime - currentSession.startTime) / 3600)} so far (
-              {currentSession.candleCount} candle{currentSession.candleCount === 1 ? '' : 's'}), still open.
-            </span>
-          </p>
-        )}
-
-        {completedSessions.length === 0 ? (
+        {!currentSession && completedSessions.length === 0 ? (
           <p className="text-sm text-text-muted">Not enough candle history loaded yet for past sessions.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -361,6 +346,27 @@ export default function AlertChart() {
                 </tr>
               </thead>
               <tbody>
+                {currentSession && (
+                  <tr
+                    className="border-t border-border text-base sm:text-lg"
+                    style={{ backgroundColor: withAlpha(currentSession.direction === 'up' ? colors.profit : colors.loss, 0.08) }}
+                  >
+                    <td className={`py-2 pr-4 font-semibold ${currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
+                      {currentSession.direction === 'up' ? 'Up' : 'Down'}
+                    </td>
+                    <td className="py-2 pr-4 text-text-muted">
+                      {formatDate(currentSession.startTime * 1000)}
+                    </td>
+                    <td className="py-2 pr-4 text-text-muted">{formatTimeOfDay(currentSession.startTime)}</td>
+                    <td className="py-2 pr-4 text-text">
+                      {formatHours((currentSession.endTime - currentSession.startTime) / 3600)} so far{' '}
+                      <span className={`font-semibold ${currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
+                        (still open)
+                      </span>
+                    </td>
+                    <td className="py-2 text-text-muted">{currentSession.candleCount}</td>
+                  </tr>
+                )}
                 {completedSessions.map((s, i) => (
                   <tr
                     key={i}
