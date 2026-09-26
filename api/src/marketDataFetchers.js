@@ -15,7 +15,21 @@ function dropWeekendBars(candles, interval, isContinuousMarket) {
   })
 }
 
-export async function fetchFromTwelveData(symbol, interval, outputsize = '200') {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// Twelve Data's free tier caps at 8 API credits per minute — easy to blow through in
+// alertsEngine.js's hourly run once there are enough active Twelve Data alerts (each
+// symbol needs one call per distinct interval its conditions use, fired back-to-back with
+// no spacing; confirmed live via the 2026-09-26 XAU/USD and BTC/USD failures, both this
+// exact message). Its own error message is the only signal available - there's no
+// separate rate-limit status code to check.
+function isRateLimitError(message) {
+  return /run out of api credits/i.test(message ?? '')
+}
+
+async function fetchFromTwelveDataOnce(symbol, interval, outputsize) {
   const apiKey = process.env.TWELVE_DATA_API_KEY
   if (!apiKey) {
     throw Object.assign(new Error('Market data is not configured on the server.'), { status: 500 })
@@ -58,6 +72,19 @@ export async function fetchFromTwelveData(symbol, interval, outputsize = '200') 
   })
 
   return dropWeekendBars(candles.reverse(), interval, isContinuousMarket)
+}
+
+export async function fetchFromTwelveData(symbol, interval, outputsize = '200') {
+  try {
+    return await fetchFromTwelveDataOnce(symbol, interval, outputsize)
+  } catch (err) {
+    if (!isRateLimitError(err.message)) throw err
+    // Wait out the per-minute credit window rather than failing the whole check - a
+    // fixed 61s covers both a rolling and a fixed calendar-minute window without needing
+    // to know which one Twelve Data actually uses.
+    await sleep(61_000)
+    return fetchFromTwelveDataOnce(symbol, interval, outputsize)
+  }
 }
 
 const YAHOO_INTERVAL = { '1h': '60m', '4h': '60m', '1day': '1d', '1week': '1wk' }
