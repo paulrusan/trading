@@ -112,6 +112,7 @@ export default function AlertChart() {
   const interval = searchParams.get('interval') ?? '1day'
 
   const [candles, setCandles] = useState([])
+  const [dailyCandles, setDailyCandles] = useState([])
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -141,10 +142,15 @@ export default function AlertChart() {
     setError('')
     Promise.all([
       api.getMarketData(symbol, interval, OUTPUT_SIZE_BY_INTERVAL[interval] ?? 2000, dataSource),
+      // Fetched independently of whatever interval is currently selected, so the daily
+      // trend-permission gate (see the mismatch warning below) is always available even
+      // while looking at the 1h/4h chart, not just when the Daily tab is selected.
+      api.getMarketData(symbol, '1day', OUTPUT_SIZE_BY_INTERVAL['1day'], dataSource),
       api.getAlerts(),
     ])
-      .then(([marketData, alerts]) => {
+      .then(([marketData, dailyMarketData, alerts]) => {
         setCandles(marketData.candles)
+        setDailyCandles(dailyMarketData.candles)
         setAlert(alerts.find((a) => a.id === alertId) ?? null)
       })
       .catch((err) => setError(err.message))
@@ -212,6 +218,26 @@ export default function AlertChart() {
     const all = currentSession ? [currentSession, ...completedSessions] : completedSessions
     return all.map((s) => ({ time: s.startTime, endTime: s.endTime, direction: s.direction }))
   }, [currentSession, completedSessions])
+
+  // The daily trend-permission gate the alert rule itself uses (see CLAUDE.md's "Alerts"
+  // section) — computed independently of whatever interval is currently selected, so
+  // switching to 1h to watch the entry trigger doesn't lose sight of whether the
+  // higher-timeframe trend actually still allows that side. Falls back to the same
+  // default daily CCI period the alert form uses if this alert has no explicit daily
+  // condition to read a period from.
+  const dailyCciPeriod = useMemo(() => {
+    const dailyCondition = alert?.conditions?.find(
+      (c) => (c.interval ?? alert.interval) === '1day' && c.type === 'indicator' && c.indicatorKey === 'cci',
+    )
+    return dailyCondition?.indicatorPeriod ?? CCI_PERIOD_BY_INTERVAL['1day']
+  }, [alert])
+
+  const dailyTrend = useMemo(() => {
+    const { current } = computeCciSessions(dailyCandles, dailyCciPeriod, 0)
+    return current?.direction ?? null
+  }, [dailyCandles, dailyCciPeriod])
+
+  const trendMismatch = interval !== '1day' && currentSession && dailyTrend && currentSession.direction !== dailyTrend
 
   if (!symbol) {
     return <div className="p-6 text-sm text-loss">Missing symbol query parameter.</div>
@@ -330,6 +356,15 @@ export default function AlertChart() {
           {INTERVALS.find((i) => i.value === interval)?.label ?? interval} sessions — CCI(
           {indicatorSettings.cci.period})
         </h2>
+
+        {trendMismatch && (
+          <p className="mb-3 rounded-md border border-loss/40 bg-loss/10 px-3 py-2 text-sm font-medium text-loss">
+            ⚠ Daily trend (CCI({dailyCciPeriod})) is {dailyTrend === 'up' ? 'up' : 'down'} while this{' '}
+            {INTERVALS.find((i) => i.value === interval)?.label?.toLowerCase() ?? interval} session is{' '}
+            {currentSession.direction === 'up' ? 'up' : 'down'} — only {dailyTrend === 'up' ? 'uptrend' : 'downtrend'}{' '}
+            setups should be played right now.
+          </p>
+        )}
 
         {!currentSession && completedSessions.length === 0 ? (
           <p className="text-sm text-text-muted">Not enough candle history loaded yet for past sessions.</p>
