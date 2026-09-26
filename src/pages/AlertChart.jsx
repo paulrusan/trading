@@ -44,13 +44,17 @@ function formatHours(hours) {
 // Viewer's local timezone (no `timeZone` override), not UTC — matches the "Entry (date)"
 // column next to it, which is local via formatDate(). `timeZoneName: 'short'` labels which
 // zone that actually is, since it's no longer a fixed, always-the-same "UTC" suffix.
+// The US zones' PST/PDT-style DST distinction reads as noise here, so it's collapsed to
+// the plain PT/MT/CT/ET form; anything else (GMT, JST, ...) passes through unchanged.
 function formatTimeOfDay(unixSeconds) {
-  return new Date(unixSeconds * 1000).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZoneName: 'short',
-  })
+  return new Date(unixSeconds * 1000)
+    .toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZoneName: 'short',
+    })
+    .replace(/\b([PMCE])[SD]T\b/, '$1T')
 }
 
 // The current (still-open) CCI-sign run, plus the last N *completed* ones, in the candles
@@ -376,15 +380,16 @@ export default function AlertChart() {
                   <th className="pb-2 pr-4 font-normal">Direction</th>
                   <th className="pb-2 pr-4 font-normal">Entry (date)</th>
                   <th className="pb-2 pr-4 font-normal">Entry (time of day)</th>
+                  <th className="pb-2 pr-4 font-normal">Candles</th>
                   <th className="pb-2 pr-4 font-normal">Duration</th>
-                  <th className="pb-2 font-normal">Candles</th>
+                  <th className="pb-2 font-normal">Trading</th>
                 </tr>
               </thead>
               <tbody>
                 {currentSession && (
                   <>
                     <tr className="border-t border-border">
-                      <td colSpan={5} className="pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-text-muted">
+                      <td colSpan={6} className="pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-text-muted">
                         Current
                       </td>
                     </tr>
@@ -399,19 +404,38 @@ export default function AlertChart() {
                         {formatDate(currentSession.startTime * 1000)}
                       </td>
                       <td className="py-2 pr-4 text-text-muted">{formatTimeOfDay(currentSession.startTime)}</td>
+                      <td className="py-2 pr-4 text-text-muted">{currentSession.candleCount}</td>
                       <td className="py-2 pr-4 text-text">
-                        {formatHours((currentSession.endTime - currentSession.startTime) / 3600)} so far{' '}
-                        <span className={`font-semibold ${currentSession.direction === 'up' ? 'text-profit' : 'text-loss'}`}>
-                          (still open)
-                        </span>
+                        {formatHours((currentSession.endTime - currentSession.startTime) / 3600)}
                       </td>
-                      <td className="py-2 text-text-muted">{currentSession.candleCount}</td>
+                      <td className="py-2 text-sm">
+                        {dailyTrend === 'up' && currentSession.direction === 'up' && (
+                          <span className="inline-flex items-center gap-1 font-semibold text-profit">
+                            ↗ Buy area
+                          </span>
+                        )}
+                        {dailyTrend === 'down' && currentSession.direction === 'down' && (
+                          <span className="inline-flex items-center gap-1 font-semibold text-loss">
+                            ↘ Sell area
+                          </span>
+                        )}
+                        {dailyTrend === 'up' && currentSession.direction === 'down' && (
+                          <span className="text-text-muted">
+                            <span className="font-semibold text-text">Wait</span> — daily is up, this session is down
+                          </span>
+                        )}
+                        {dailyTrend === 'down' && currentSession.direction === 'up' && (
+                          <span className="text-text-muted">
+                            <span className="font-semibold text-text">Wait</span> — daily is down, this session is up
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   </>
                 )}
                 {completedSessions.length > 0 && (
                   <tr className="border-t border-border">
-                    <td colSpan={5} className="pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-text-muted">
+                    <td colSpan={6} className="pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-text-muted">
                       Past sessions
                     </td>
                   </tr>
@@ -429,8 +453,9 @@ export default function AlertChart() {
                       {formatDate(s.startTime * 1000)}
                     </td>
                     <td className="py-2 pr-4 text-text-muted">{formatTimeOfDay(s.startTime)}</td>
+                    <td className="py-2 pr-4 text-text-muted">{s.candleCount}</td>
                     <td className="py-2 pr-4 text-text">{formatHours((s.endTime - s.startTime) / 3600)}</td>
-                    <td className="py-2 text-text-muted">{s.candleCount}</td>
+                    <td className="py-2 text-text-muted">—</td>
                   </tr>
                 ))}
               </tbody>
