@@ -60,6 +60,11 @@ async function runAlertsCheckInner(log) {
   let checked = 0
   let triggered = 0
   let failed = 0
+  // Per-alert failure detail, surfaced through the heartbeat doc below so a "2 failed" on
+  // the Alerts page is actually diagnosable from the app itself instead of just a count —
+  // this is exactly the gap that left the 2026-09-25 missed-alert investigation with no
+  // way to know *why* those runs failed after the fact.
+  const failures = []
 
   for (const [key, groupAlerts] of groups) {
     const [symbol, dataSource] = key.split('|')
@@ -70,7 +75,7 @@ async function runAlertsCheckInner(log) {
     }
 
     const candlesByInterval = new Map()
-    let fetchFailed = false
+    const fetchErrors = []
     for (const interval of intervals) {
       try {
         candlesByInterval.set(
@@ -79,11 +84,14 @@ async function runAlertsCheckInner(log) {
         )
       } catch (err) {
         log(`Failed to fetch ${key}|${interval}: ${err.message}`)
-        fetchFailed = true
+        fetchErrors.push(`${interval}: ${err.message}`)
       }
     }
-    if (fetchFailed) {
+    if (fetchErrors.length > 0) {
       failed += groupAlerts.length
+      for (const alert of groupAlerts) {
+        failures.push({ alertId: alert.id, symbol, dataSource, stage: 'fetch', message: fetchErrors.join('; ') })
+      }
       continue
     }
 
@@ -95,6 +103,7 @@ async function runAlertsCheckInner(log) {
       } catch (err) {
         log(`Failed to evaluate alert ${alert.id}: ${err.message}`)
         failed++
+        failures.push({ alertId: alert.id, symbol, dataSource, stage: 'evaluate', message: err.message })
         continue
       }
       if (!result || !result.triggered) continue
@@ -119,11 +128,12 @@ async function runAlertsCheckInner(log) {
       } catch (err) {
         log(`Failed to send/record alert ${alert.id}: ${err.message}`)
         failed++
+        failures.push({ alertId: alert.id, symbol, dataSource, stage: 'send', message: err.message })
       }
     }
   }
 
-  return { alertsActive: alerts.length, groups: groups.size, checked, triggered, failed }
+  return { alertsActive: alerts.length, groups: groups.size, checked, triggered, failed, failures }
 }
 
 app.timer('alertsEngine', {

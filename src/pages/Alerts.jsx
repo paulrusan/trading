@@ -456,12 +456,25 @@ function EngineStatusLine({ status }) {
     )
   }
 
+  const failures = status.summary?.failures ?? []
+
   return (
-    <p className={`mb-4 text-xs ${stale ? 'text-loss' : 'text-text-muted'}`}>
-      Hourly check last ran {formatDateTime(status.lastRunAt)}
-      {stale && ' — that\'s over an hour ago, the next tick may have been skipped'}
-      {status.summary && ` — ${status.summary.checked} checked, ${status.summary.triggered} triggered, ${status.summary.failed} failed`}
-    </p>
+    <div className="mb-4">
+      <p className={`text-xs ${stale ? 'text-loss' : 'text-text-muted'}`}>
+        Hourly check last ran {formatDateTime(status.lastRunAt)}
+        {stale && ' — that\'s over an hour ago, the next tick may have been skipped'}
+        {status.summary && ` — ${status.summary.checked} checked, ${status.summary.triggered} triggered, ${status.summary.failed} failed`}
+      </p>
+      {failures.length > 0 && (
+        <ul className="mt-1 list-inside list-disc text-xs text-loss">
+          {failures.map((f, i) => (
+            <li key={i}>
+              {f.symbol} ({f.stage}): {f.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
